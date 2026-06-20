@@ -22,11 +22,42 @@ PARTY_COLORS: dict[Party, pygame.Color] = {
     Party.INDEPENDENT: pygame.Color(240, 190, 50),
 }
 
+SPLIT_STATE_COLOR = pygame.Color(140, 80, 180)
+NO_DELEGATION_COLOR = pygame.Color(55, 58, 70)
+
+
+def color_for_senate_delegation(parties: list[Party]) -> pygame.Color:
+    if not parties:
+        return NO_DELEGATION_COLOR
+    if len(set(parties)) == 1:
+        return PARTY_COLORS[parties[0]]
+    return SPLIT_STATE_COLOR
+
+
+def color_for_weighted_parties(parties: list[Party]) -> pygame.Color:
+    """Blend party colors by seat count (e.g. 2D + 1I + 5R → mostly red with hints of blue/yellow)."""
+    if not parties:
+        return NO_DELEGATION_COLOR
+    total = len(parties)
+    red = sum(PARTY_COLORS[party].r for party in parties) / total
+    green = sum(PARTY_COLORS[party].g for party in parties) / total
+    blue = sum(PARTY_COLORS[party].b for party in parties) / total
+    return pygame.Color(int(red), int(green), int(blue))
+
 
 def cycle_party(party: Party) -> Party:
     order = (Party.DEMOCRAT, Party.REPUBLICAN, Party.INDEPENDENT)
     index = order.index(party)
     return order[(index + 1) % len(order)]
+
+
+def swap_major_party(party: Party) -> Party:
+    """Toggle Democrat ↔ Republican. Independents become Democrat."""
+    if party == Party.DEMOCRAT:
+        return Party.REPUBLICAN
+    if party == Party.REPUBLICAN:
+        return Party.DEMOCRAT
+    return Party.DEMOCRAT
 
 
 def default_party_for_index(index: int, total: int) -> Party:

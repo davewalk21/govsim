@@ -5,6 +5,11 @@ import pygame
 from core.party import PARTY_COLORS, Party
 
 
+def party_bar_rect(screen_width: int, y: int = 98, height: int = 32) -> pygame.Rect:
+    width = min(720, screen_width - 200)
+    return pygame.Rect((screen_width - width) // 2, y, width, height)
+
+
 def draw_party_bar(
     surface: pygame.Surface,
     rect: pygame.Rect,
@@ -42,4 +47,4 @@ def draw_party_bar(
         x += width
 
     total_label = font.render(f"{total} total", True, (170, 175, 190))
-    surface.blit(total_label, (rect.right + 12, rect.y + 6))
+    surface.blit(total_label, total_label.get_rect(midtop=(rect.centerx, rect.bottom + 4)))

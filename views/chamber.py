@@ -5,21 +5,18 @@ from dataclasses import dataclass
 
 import pygame
 
-from core.party import (
-    BACKGROUND_COLOR,
-    PARTY_COLORS,
-    Party,
-    apply_half_split,
-    count_parties,
-    cycle_party,
-)
-from views.party_bar import draw_party_bar
+from core.party import BACKGROUND_COLOR, PARTY_COLORS, Party
+from core.politician import Politician
+from core.rosters import Roster
+from views.party_bar import draw_party_bar, party_bar_rect
+
+SEAT_PADDING = 3
 
 
 @dataclass
 class Seat:
     index: int
-    party: Party
+    politician_id: str
     position: pygame.Vector2
     radius: float
 
@@ -28,88 +25,69 @@ class Seat:
 
 
 class ChamberView:
-    """Semicircle seating chart shared by Senate (100) and House (435)."""
+    """Semicircle seating chart driven by a politician roster."""
 
     def __init__(
         self,
         title: str,
-        seat_count: int,
+        roster: Roster,
         rows: int,
         screen_size: tuple[int, int],
     ) -> None:
         self.title = title
-        self.seat_count = seat_count
+        self.roster = roster
+        self.seat_count = len(roster.members)
         self.rows = rows
         self.screen_size = screen_size
-        self.seats = self._build_seats()
-        apply_half_split(self.seats, lambda seat, party: setattr(seat, "party", party))
         self.font = pygame.font.SysFont(None, 22)
         self.title_font = pygame.font.SysFont(None, 36)
-        self.bar_rect = pygame.Rect(250, 98, screen_size[0] - 430, 32)
+        width = screen_size[0]
+        self.bar_rect = party_bar_rect(width)
+        self.seats: list[Seat] = []
+        self.seat_font = pygame.font.SysFont(None, 14)
+        self._refresh_seats()
 
-    def _build_seats(self) -> list[Seat]:
+    def _refresh_seats(self) -> None:
+        self.seats, self.seat_font = self._build_seats()
+
+    def _build_seats(self) -> tuple[list[Seat], pygame.font.Font]:
         width, height = self.screen_size
         base = min(width, height)
-        size_factor = min(math.sqrt(435 / self.seat_count), 2.25)
-
-        inner_radius = base * 0.10 * size_factor
-        row_spacing = base * 0.042 * size_factor
-        outer_radius = inner_radius + (self.rows - 1) * row_spacing
-        max_allowed = min(width * 0.44, height * 0.52)
-        if outer_radius > max_allowed:
-            shrink = max_allowed / outer_radius
-            inner_radius *= shrink
-            row_spacing *= shrink
-
         center = pygame.Vector2(width * 0.5, height * 0.84)
-        center_gap = math.radians(12 + 4 * (435 / max(self.seat_count, 1)))
+        max_arc_radius = min(width * 0.44, height * 0.50)
+
         row_counts = _distribute_seats(self.seat_count, self.rows)
+        ordered = _order_for_chamber(self.roster.members)
+
+        size_factor = min(math.sqrt(435 / self.seat_count), 2.25)
         seat_radius = max(6.0, min(22.0, base * 0.016 * size_factor))
-        label_size = max(14, min(24, int(seat_radius * 1.25)))
-        self.seat_font = pygame.font.SysFont(None, label_size)
+
+        inner_radius, row_spacing = _fit_semicircle_layout(
+            row_counts, seat_radius, max_arc_radius
+        )
+
+        label_size = max(10, min(18, int(seat_radius * 1.1)))
+        seat_font = pygame.font.SysFont(None, label_size)
+
+        slots = _build_slot_geometry(
+            center, row_counts, inner_radius, row_spacing
+        )
 
         seats: list[Seat] = []
-        seat_index = 1
-        for row, count in enumerate(row_counts):
-            row_radius = inner_radius + row * row_spacing
-            left_count = count // 2
-            right_count = count - left_count
-            left_start = math.pi
-            left_end = math.pi / 2 + center_gap / 2
-            right_start = math.pi / 2 - center_gap / 2
-            right_end = 0.0
+        for index, (position, politician) in enumerate(zip(slots, ordered)):
+            seats.append(
+                Seat(
+                    index=index + 1,
+                    politician_id=politician.id,
+                    position=position,
+                    radius=seat_radius,
+                )
+            )
 
-            for side_count, start_angle, end_angle in (
-                (left_count, left_start, left_end),
-                (right_count, right_start, right_end),
-            ):
-                if side_count <= 0:
-                    continue
-                if side_count == 1:
-                    angles = [(start_angle + end_angle) / 2]
-                else:
-                    step = (start_angle - end_angle) / (side_count - 1)
-                    angles = [start_angle - step * i for i in range(side_count)]
-
-                for angle in angles:
-                    position = center + pygame.Vector2(
-                        math.cos(angle) * row_radius,
-                        -math.sin(angle) * row_radius,
-                    )
-                    seats.append(
-                        Seat(
-                            index=seat_index,
-                            party=Party.DEMOCRAT,
-                            position=position,
-                            radius=seat_radius,
-                        )
-                    )
-                    seat_index += 1
-
-        return seats
+        return seats, seat_font
 
     def party_counts(self) -> dict[Party, int]:
-        return count_parties(self.seats, lambda seat: seat.party)
+        return self.roster.party_counts()
 
     def handle_event(self, event: pygame.event.Event) -> None:
         if event.type != pygame.MOUSEBUTTONDOWN or event.button != 1:
@@ -117,7 +95,8 @@ class ChamberView:
         point = event.pos
         for seat in reversed(self.seats):
             if seat.contains(point):
-                seat.party = cycle_party(seat.party)
+                self.roster.cycle_member(seat.politician_id)
+                self._refresh_seats()
                 break
 
     def draw(self, surface: pygame.Surface) -> None:
@@ -140,16 +119,14 @@ class ChamberView:
         surface.blit(hint, (24, height - 28))
 
         for seat in self.seats:
-            color = PARTY_COLORS[seat.party]
-            pygame.draw.circle(
-                surface, color, seat.position, int(seat.radius)
+            politician = self.roster.get(seat.politician_id)
+            color = PARTY_COLORS[politician.party]
+            pygame.draw.circle(surface, color, seat.position, int(seat.radius))
+            label = self.seat_font.render(politician.title, True, (245, 245, 245))
+            surface.blit(
+                label,
+                label.get_rect(center=(int(seat.position.x), int(seat.position.y))),
             )
-            if self.seat_count <= 100:
-                label = self.seat_font.render(str(seat.index), True, (245, 245, 245))
-                surface.blit(
-                    label,
-                    label.get_rect(center=(int(seat.position.x), int(seat.position.y))),
-                )
 
         self._draw_legend(surface)
 
@@ -160,6 +137,102 @@ class ChamberView:
             text = self.font.render(party.value.title(), True, (220, 220, 225))
             surface.blit(text, (x + 16, y))
             y += 24
+
+
+def _party_queues(
+    members: list[Politician],
+) -> tuple[list[Politician], list[Politician], list[Politician]]:
+    """Democrats, independents, republicans — each grouped by state."""
+
+    def group_by_state(party_members: list[Politician]) -> list[Politician]:
+        by_state: dict[str, list[Politician]] = {}
+        for member in party_members:
+            key = member.state or ""
+            by_state.setdefault(key, []).append(member)
+        ordered: list[Politician] = []
+        for state in sorted(by_state.keys()):
+            group = sorted(
+                by_state[state],
+                key=lambda member: (member.seat or 0, member.district or 0, member.id),
+            )
+            ordered.extend(group)
+        return ordered
+
+    democrats = group_by_state([m for m in members if m.party == Party.DEMOCRAT])
+    independents = group_by_state([m for m in members if m.party == Party.INDEPENDENT])
+    republicans = group_by_state([m for m in members if m.party == Party.REPUBLICAN])
+    return democrats, independents, republicans
+
+
+def _order_for_chamber(members: list[Politician]) -> list[Politician]:
+    """Left to right: Democrats, independents, Republicans (state-grouped within each)."""
+    dems, independents, reps = _party_queues(members)
+    return dems + independents + reps
+
+
+def _build_slot_geometry(
+    center: pygame.Vector2,
+    row_counts: list[int],
+    inner_radius: float,
+    row_spacing: float,
+) -> list[pygame.Vector2]:
+    """Fixed semicircle slots sorted left-to-right (angle), inner-to-outer (radius)."""
+    slots: list[tuple[float, float, pygame.Vector2]] = []
+
+    for row, count in enumerate(row_counts):
+        row_radius = inner_radius + row * row_spacing
+        for angle in _row_angles(count):
+            position = center + pygame.Vector2(
+                math.cos(angle) * row_radius,
+                -math.sin(angle) * row_radius,
+            )
+            slots.append((angle, row_radius, position))
+
+    slots.sort(key=lambda slot: (-slot[0], slot[1]))
+    return [position for _, _, position in slots]
+
+
+def _row_angles(count: int) -> list[float]:
+    if count <= 1:
+        return [math.pi / 2]
+    step = math.pi / (count - 1)
+    return [math.pi - step * index for index in range(count)]
+
+
+def _min_radius_for_row(count: int, seat_radius: float) -> float:
+    if count <= 1:
+        return 0.0
+    return 2 * (seat_radius + SEAT_PADDING) * (count - 1) / math.pi
+
+
+def _fit_semicircle_layout(
+    row_counts: list[int],
+    seat_radius: float,
+    max_arc_radius: float,
+) -> tuple[float, float]:
+    radial_gap = 2 * seat_radius + SEAT_PADDING
+    inner_radius = max(_min_radius_for_row(row_counts[0], seat_radius), seat_radius + 4)
+    row_spacing = radial_gap
+
+    for _ in range(24):
+        outer_radius = inner_radius + (len(row_counts) - 1) * row_spacing
+        arc_ok = all(
+            _min_radius_for_row(count, seat_radius) <= inner_radius + row * row_spacing
+            for row, count in enumerate(row_counts)
+        )
+        if outer_radius <= max_arc_radius and arc_ok:
+            return inner_radius, row_spacing
+
+        if outer_radius > max_arc_radius:
+            row_spacing *= 0.94
+            inner_radius *= 0.96
+        elif not arc_ok:
+            inner_radius += 4
+            row_spacing += 1
+        else:
+            break
+
+    return inner_radius, row_spacing
 
 
 def _distribute_seats(total: int, rows: int) -> list[int]:

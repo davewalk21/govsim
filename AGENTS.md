@@ -8,16 +8,30 @@ Government simulator game in Python + Pygame. UI-first phase: three interactive 
 govsim/
 ├── main.py              # Game loop, view switching, dropdown
 ├── core/
-│   └── party.py         # Party enum, colors, defaults, counting
+│   ├── party.py         # Party enum, colors, counting helpers
+│   ├── politician.py    # Politician record + Office enum
+│   ├── rosters.py       # Roster + create_senate/house/governors()
+│   ├── government.py    # Government — source of truth for all office-holders
+│   └── states.py        # US state abbreviations
 ├── views/
-│   ├── chamber.py       # Senate (100) & House (435) semicircle seats
-│   ├── map_view.py      # US state map (GeoJSON)
+│   ├── chamber.py       # Senate & House semicircles (read from Roster)
+│   ├── map_view.py      # Governors map (read from governors Roster)
 │   ├── party_bar.py     # Shared D | I | R totals bar
 │   └── dropdown.py      # View switcher (top-left)
 ├── data/
 │   └── us_states.json   # State boundaries (do not commit huge replacements)
 └── requirements.txt     # pygame
 ```
+
+## Source of truth
+
+All party affiliation lives on `Politician` objects inside `Government`:
+
+- `government.senate` — 100 senators (2 per state)
+- `government.house` — 435 representatives
+- `government.governors` — 50 governors (1 per state)
+
+Views are display layers only. Clicking a seat or state calls `roster.cycle_member(id)`.
 
 ## Run & test
 
@@ -57,7 +71,7 @@ Controls: dropdown (top-left) or keys **1** Senate, **2** House, **3** Map. Clic
 | Change party colors | `PARTY_COLORS` in `core/party.py` |
 | Change starting affiliation | `default_party_for_index()` or `apply_half_split()` in `core/party.py` |
 | Tune seat layout / dot size | `ChamberView._build_seats()` in `views/chamber.py` |
-| Map appearance / projection | `MapView` in `views/map_view.py` |
+| Map appearance / projection | `GovernorMapView`, `SenateMapView`, `HouseMapView` in `views/map_view.py` |
 
 ## Out of scope (for now)
 

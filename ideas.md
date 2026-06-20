@@ -3,12 +3,17 @@
 
 ## Short Term
 # Chamber
-- make it look nicer
-- add
+- make it look nicer, without overlapping
+- 
 
 # Map
 - drill-down on a state
     show the counties/voting districts
+- include a map for each of the 3:
+    1. Governers
+    2. Senators
+    3. House (this may be tough)
+
 
 # Gameplay
 - track members between views, need to create a class for a "person" and other things
@@ -76,3 +81,7 @@
     Scandals
     Appointments
     They happen at a regular cadence with some random ones thrown in
+
+
+- Other things
+    Play as a different region with different governments?
