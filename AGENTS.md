@@ -1,6 +1,6 @@
 # GovSim — Agent Instructions
 
-Government simulator game in Python + Pygame. UI-first phase: three interactive views with live party totals.
+Government simulator game in Python + Pygame. Six views (chamber + map for Senate, House, Governors) with live party totals.
 
 ## Project layout
 
@@ -15,11 +15,14 @@ govsim/
 │   └── states.py        # US state abbreviations
 ├── views/
 │   ├── chamber.py       # Senate & House semicircles (read from Roster)
-│   ├── map_view.py      # Governors map (read from governors Roster)
+│   ├── map_view.py      # Governor/Senate/House maps (read from Roster)
+│   ├── geo.py           # GeoJSON loading + Albers USA screen projection
+│   ├── albers_usa.py    # Albers composite projection (from cassandra/geo_maps)
 │   ├── party_bar.py     # Shared D | I | R totals bar
 │   └── dropdown.py      # View switcher (top-left)
 ├── data/
-│   └── us_states.json   # State boundaries (do not commit huge replacements)
+│   ├── us_states.json   # State boundaries
+│   └── us_cd118.geojson # 118th Congress district boundaries (435 seats)
 └── requirements.txt     # pygame
 ```
 
@@ -40,7 +43,7 @@ Views are display layers only. Clicking a seat or state calls `roster.cycle_memb
 python main.py
 ```
 
-Controls: dropdown (top-left) or keys **1** Senate, **2** House, **3** Map. Click seats/states to cycle party: Democrat → Republican → Independent.
+Controls: dropdown (top-left) or keys **1–6** (`senate_chamber`, `senate_map`, `house_chamber`, `house_map`, `governor_chamber`, `governor_map`). Click seats/states to cycle party: Democrat → Republican → Independent.
 
 ## Architecture conventions
 
@@ -71,7 +74,7 @@ Controls: dropdown (top-left) or keys **1** Senate, **2** House, **3** Map. Clic
 | Change party colors | `PARTY_COLORS` in `core/party.py` |
 | Change starting affiliation | `default_party_for_index()` or `apply_half_split()` in `core/party.py` |
 | Tune seat layout / dot size | `ChamberView._build_seats()` in `views/chamber.py` |
-| Map appearance / projection | `GovernorMapView`, `SenateMapView`, `HouseMapView` in `views/map_view.py` |
+| Map appearance / projection | `views/geo.py`, `views/albers_usa.py`, map classes in `views/map_view.py` |
 
 ## Out of scope (for now)
 

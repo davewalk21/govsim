@@ -60,6 +60,30 @@ def swap_major_party(party: Party) -> Party:
     return Party.DEMOCRAT
 
 
+def senate_major_party(party: Party) -> Party:
+    """Senate map cycling treats independents as Republican."""
+    if party == Party.DEMOCRAT:
+        return Party.DEMOCRAT
+    return Party.REPUBLICAN
+
+
+def cycle_senate_delegation(senators: list) -> None:
+    """Cycle R,R → D,R → D,D → R,D → R,R (flip seat 1, then seat 2)."""
+    if len(senators) != 2:
+        return
+    ordered = sorted(senators, key=lambda member: member.seat or 0)
+    first = senate_major_party(ordered[0].party)
+    second = senate_major_party(ordered[1].party)
+    if first == Party.REPUBLICAN and second == Party.REPUBLICAN:
+        ordered[0].party = Party.DEMOCRAT
+    elif first == Party.DEMOCRAT and second == Party.REPUBLICAN:
+        ordered[1].party = Party.DEMOCRAT
+    elif first == Party.DEMOCRAT and second == Party.DEMOCRAT:
+        ordered[0].party = Party.REPUBLICAN
+    else:
+        ordered[1].party = Party.REPUBLICAN
+
+
 def default_party_for_index(index: int, total: int) -> Party:
     """First half Democrat, second half Republican."""
     if index < total // 2:
