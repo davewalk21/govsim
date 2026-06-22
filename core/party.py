@@ -97,6 +97,45 @@ def apply_half_split(items: list[T], party_setter: Callable[[T, Party], None]) -
         party_setter(item, default_party_for_index(index, total))
 
 
+def lean_fill_color(party: Party, strength: float = 0.38) -> pygame.Color:
+    """Tint a party color toward the background for pre-election lean shading."""
+    base = PARTY_COLORS[party]
+    bg = BACKGROUND_COLOR
+    return pygame.Color(
+        int(bg[0] + strength * (base.r - bg[0])),
+        int(bg[1] + strength * (base.g - bg[1])),
+        int(bg[2] + strength * (base.b - bg[2])),
+    )
+
+
+def poll_gradient_color(dem_pct: float, rep_pct: float, *, strength: float = 0.52) -> pygame.Color:
+    """Blue ←→ red fill from two-party Dem share (0–100 scale inputs)."""
+    two_party = dem_pct + rep_pct
+    dem_share = dem_pct / two_party if two_party > 0 else 0.5
+    dem_share = max(0.0, min(1.0, dem_share))
+    dem = PARTY_COLORS[Party.DEMOCRAT]
+    rep = PARTY_COLORS[Party.REPUBLICAN]
+    base = pygame.Color(
+        int(dem.r * dem_share + rep.r * (1.0 - dem_share)),
+        int(dem.g * dem_share + rep.g * (1.0 - dem_share)),
+        int(dem.b * dem_share + rep.b * (1.0 - dem_share)),
+    )
+    bg = BACKGROUND_COLOR
+    return pygame.Color(
+        int(bg[0] + strength * (base.r - bg[0])),
+        int(bg[1] + strength * (base.g - bg[1])),
+        int(bg[2] + strength * (base.b - bg[2])),
+    )
+
+
+def opposite_major_party(party: Party) -> Party:
+    if party == Party.DEMOCRAT:
+        return Party.REPUBLICAN
+    if party == Party.REPUBLICAN:
+        return Party.DEMOCRAT
+    return Party.REPUBLICAN
+
+
 def count_parties(items: Iterable[T], party_getter: Callable[[T], Party]) -> dict[Party, int]:
     counts = {party: 0 for party in Party}
     for item in items:

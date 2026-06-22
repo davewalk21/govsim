@@ -2,13 +2,22 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from core.party import Party, count_parties, default_party_for_index
+from core.defaults import (
+    all_state_leans,
+    court_seat_party,
+    house_district_parties,
+    senate_seat_parties,
+    state_lean,
+)
+from core.generate import random_politician_identity
+from core.party import Party, count_parties
 from core.politician import Office, Politician, build_title
-from core.states import HOUSE_SEATS_BY_STATE, STATE_ABBREV_TO_NAME, US_STATE_ABBREVS
+from core.states import HOUSE_SEATS_BY_STATE, US_STATE_ABBREVS
 
 SENATE_SEATS = 100
 HOUSE_SEATS = 435
 GOVERNOR_SEATS = len(US_STATE_ABBREVS)
+COURT_SEATS = 9
 
 
 @dataclass
@@ -71,18 +80,23 @@ class Roster:
         self.get(member_id).cycle_party()
 
 
+def _make_politician(**kwargs) -> Politician:
+    party = kwargs["party"]
+    identity = random_politician_identity(party)
+    return Politician(**identity, **kwargs)
+
+
 def create_senate() -> Roster:
     members: list[Politician] = []
     for state in US_STATE_ABBREVS:
+        seat_parties = senate_seat_parties(state)
         for seat in (1, 2):
-            index = len(members)
             title = build_title(Office.SENATE, state, seat=seat)
             members.append(
-                Politician(
+                _make_politician(
                     id=f"senate-{state}-{seat}",
-                    name=f"Placeholder ({title})",
                     title=title,
-                    party=default_party_for_index(index, SENATE_SEATS),
+                    party=seat_parties[seat - 1],
                     office=Office.SENATE,
                     state=state,
                     seat=seat,
@@ -94,15 +108,14 @@ def create_senate() -> Roster:
 def create_house() -> Roster:
     members: list[Politician] = []
     for state in US_STATE_ABBREVS:
+        district_parties = house_district_parties(state)
         for district in range(1, HOUSE_SEATS_BY_STATE[state] + 1):
-            index = len(members)
             title = build_title(Office.HOUSE, state, district=district)
             members.append(
-                Politician(
+                _make_politician(
                     id=f"house-{state}-{district}",
-                    name=f"Placeholder ({title})",
                     title=title,
-                    party=default_party_for_index(index, HOUSE_SEATS),
+                    party=district_parties[district - 1],
                     office=Office.HOUSE,
                     state=state,
                     district=district,
@@ -113,17 +126,31 @@ def create_house() -> Roster:
 
 def create_governors() -> Roster:
     members: list[Politician] = []
-    for index, state in enumerate(US_STATE_ABBREVS):
-        full_name = STATE_ABBREV_TO_NAME.get(state, state)
+    for state in US_STATE_ABBREVS:
         title = build_title(Office.GOVERNOR, state)
         members.append(
-            Politician(
+            _make_politician(
                 id=f"governor-{state}",
-                name=f"Placeholder ({full_name})",
                 title=title,
-                party=default_party_for_index(index, GOVERNOR_SEATS),
+                party=state_lean(state),
                 office=Office.GOVERNOR,
                 state=state,
             )
         )
     return Roster(office=Office.GOVERNOR, members=members)
+
+
+def create_court() -> Roster:
+    members: list[Politician] = []
+    for seat in range(1, COURT_SEATS + 1):
+        title = build_title(Office.COURT, seat=seat)
+        members.append(
+            _make_politician(
+                id=f"court-{seat}",
+                title=title,
+                party=court_seat_party(seat),
+                office=Office.COURT,
+                seat=seat,
+            )
+        )
+    return Roster(office=Office.COURT, members=members)

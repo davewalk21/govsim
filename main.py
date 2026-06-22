@@ -1,30 +1,163 @@
+from __future__ import annotations
+
+from enum import Enum
+
 import pygame
 
+from core.election import PresidentialElection
 from core.government import Government
-from views.chamber import ChamberView
-from views.dropdown import Dropdown
+from views.chamber import BenchChamberView, ChamberView
+from views.election_map import ElectionCampaignView
+from views.game_bar import ElectionGameBar
+from views.home import HomeScreen
 from views.map_view import GovernorMapView, HouseMapView, SenateMapView
+from views.nav import ViewNavigator
+from views.party_roster import RosterView
 
 SCREEN_SIZE = (1280, 800)
 FPS = 60
 
-VIEW_OPTIONS = [
-    ("Senate", "senate_chamber"),
-    ("Senate Map", "senate_map"),
-    ("House", "house_chamber"),
-    ("House Map", "house_map"),
-    ("Governors", "governor_chamber"),
-    ("Governors Map", "governor_map"),
-]
 
-VIEW_KEYS = {
-    pygame.K_1: "senate_chamber",
-    pygame.K_2: "senate_map",
-    pygame.K_3: "house_chamber",
-    pygame.K_4: "house_map",
-    pygame.K_5: "governor_chamber",
-    pygame.K_6: "governor_map",
-}
+class AppMode(Enum):
+    HOME = "home"
+    DEV = "dev"
+    ELECTION = "election"
+
+
+class App:
+    def __init__(self, screen_size: tuple[int, int]) -> None:
+        self.screen_size = screen_size
+        self.mode = AppMode.HOME
+        self.home = HomeScreen(screen_size)
+        self.government: Government | None = None
+        self.navigator: ViewNavigator | None = None
+        self.views: dict | None = None
+        self.election: PresidentialElection | None = None
+        self.election_view: ElectionCampaignView | None = None
+        self.game_bar: ElectionGameBar | None = None
+
+    def start_dev_mode(self) -> None:
+        self.government = Government.create_default()
+        self.views = {
+            "senate_chamber": ChamberView(
+                "U.S. Senate (100 seats)", self.government.senate, 4, self.screen_size
+            ),
+            "senate_map": SenateMapView(self.screen_size, self.government.senate),
+            "senate_roster": RosterView(self.screen_size, self.government.senate, "Senate"),
+            "house_chamber": ChamberView(
+                "U.S. House (435 seats)", self.government.house, 11, self.screen_size
+            ),
+            "house_map": HouseMapView(self.screen_size, self.government.house),
+            "house_roster": RosterView(self.screen_size, self.government.house, "House"),
+            "governors_chamber": ChamberView(
+                "U.S. Governors (50 seats)", self.government.governors, 4, self.screen_size
+            ),
+            "governors_map": GovernorMapView(self.screen_size, self.government.governors),
+            "governors_roster": RosterView(
+                self.screen_size, self.government.governors, "Governors"
+            ),
+            "court_chamber": BenchChamberView(
+                "U.S. Supreme Court (9 seats)", self.government.court, self.screen_size
+            ),
+            "court_roster": RosterView(self.screen_size, self.government.court, "Court"),
+        }
+        self.navigator = ViewNavigator()
+        self.navigator.set_screen_width(self.screen_size[0])
+        self.mode = AppMode.DEV
+
+    def go_home(self) -> None:
+        self.mode = AppMode.HOME
+        self.government = None
+        self.navigator = None
+        self.views = None
+        self.election = None
+        self.election_view = None
+        self.game_bar = None
+
+    def start_new_game(self) -> None:
+        self.election = PresidentialElection.create_new()
+        self.election_view = ElectionCampaignView(self.screen_size, self.election)
+        self.game_bar = ElectionGameBar(self.screen_size)
+        self._sync_election_bar()
+        self.mode = AppMode.ELECTION
+
+    def _sync_election_bar(self) -> None:
+        if self.game_bar is None or self.election is None:
+            return
+        self.game_bar.set_countdown(
+            self.election.countdown_label(),
+            button_enabled=not self.election.resolved,
+        )
+
+    def handle_event(self, event: pygame.event.Event) -> bool:
+        """Return False to quit the application."""
+        if event.type == pygame.QUIT:
+            return False
+
+        if self.mode == AppMode.HOME:
+            self.home.handle_event(event)
+            action = self.home.pending_action
+            if action == "new_game":
+                self.home.pending_action = None
+                self.start_new_game()
+            elif action == "dev_mode":
+                self.home.pending_action = None
+                self.start_dev_mode()
+            elif action == "exit":
+                return False
+            return True
+
+        if self.mode == AppMode.ELECTION:
+            if self.game_bar and self.game_bar.handle_event(event):
+                if self.game_bar.consume_home():
+                    self.go_home()
+                    return True
+                if self.game_bar.consume_next_turn() and self.election:
+                    self.election.next_turn()
+                    self._sync_election_bar()
+                return True
+            if self.election_view and self.election_view.handle_event(event):
+                return True
+            return True
+
+        if self.mode == AppMode.DEV:
+            assert self.navigator is not None and self.views is not None
+            active_key = self.navigator.active_view_key
+            active_view = self.views[active_key]
+            if active_key.endswith("_roster"):
+                active_view.set_party(self.navigator.party)
+
+            if self.navigator.handle_event(event):
+                if self.navigator.consume_home():
+                    self.go_home()
+                    return True
+                return True
+            active_view.handle_event(event)
+            return True
+
+        return True
+
+    def update(self) -> None:
+        mouse_pos = pygame.mouse.get_pos()
+        if self.mode == AppMode.DEV and self.navigator and self.views:
+            active_view = self.views[self.navigator.active_view_key]
+            if hasattr(active_view, "update_hover"):
+                active_view.update_hover(mouse_pos)
+        if self.mode == AppMode.ELECTION and self.election_view:
+            if hasattr(self.election_view, "update_hover"):
+                self.election_view.update_hover(mouse_pos)
+
+    def draw(self, surface: pygame.Surface) -> None:
+        if self.mode == AppMode.HOME:
+            self.home.draw(surface)
+        elif self.mode == AppMode.ELECTION:
+            assert self.election_view is not None and self.game_bar is not None
+            self.election_view.draw(surface)
+            self.game_bar.draw(surface)
+        elif self.mode == AppMode.DEV:
+            assert self.navigator is not None and self.views is not None
+            self.views[self.navigator.active_view_key].draw(surface)
+            self.navigator.draw(surface)
 
 
 def main() -> None:
@@ -32,45 +165,17 @@ def main() -> None:
     screen = pygame.display.set_mode(SCREEN_SIZE)
     pygame.display.set_caption("GovSim")
     clock = pygame.time.Clock()
-
-    government = Government.create_default()
-    views = {
-        "senate_chamber": ChamberView(
-            "U.S. Senate (100 seats)", government.senate, 4, SCREEN_SIZE
-        ),
-        "senate_map": SenateMapView(SCREEN_SIZE, government.senate),
-        "house_chamber": ChamberView(
-            "U.S. House (435 seats)", government.house, 11, SCREEN_SIZE
-        ),
-        "house_map": HouseMapView(SCREEN_SIZE, government.house),
-        "governor_chamber": ChamberView(
-            "U.S. Governors (50 seats)", government.governors, 4, SCREEN_SIZE
-        ),
-        "governor_map": GovernorMapView(SCREEN_SIZE, government.governors),
-    }
-    active_view = "senate_chamber"
-    dropdown = Dropdown(
-        pygame.Rect(24, 16, 220, 36),
-        VIEW_OPTIONS,
-        active_view,
-    )
+    app = App(SCREEN_SIZE)
 
     running = True
     while running:
         for event in pygame.event.get():
-            if event.type == pygame.QUIT:
+            if not app.handle_event(event):
                 running = False
-            elif dropdown.handle_event(event):
-                active_view = dropdown.selected_key
-            elif not dropdown.open:
-                if event.type == pygame.KEYDOWN and event.key in VIEW_KEYS:
-                    active_view = VIEW_KEYS[event.key]
-                    dropdown.set_selected(active_view)
-                else:
-                    views[active_view].handle_event(event)
+                break
 
-        views[active_view].draw(screen)
-        dropdown.draw(screen)
+        app.update()
+        app.draw(screen)
         pygame.display.flip()
         clock.tick(FPS)
 

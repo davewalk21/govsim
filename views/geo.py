@@ -17,7 +17,10 @@ from views.albers_usa import (
     prepare_coordinates,
 )
 
+from views.layout import PARTY_BAR_Y
+
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+MAP_TOP = PARTY_BAR_Y + 52
 STATES_GEOJSON_PATH = DATA_DIR / "us_states.json"
 DISTRICTS_GEOJSON_PATH = DATA_DIR / "us_cd118.geojson"
 
@@ -104,16 +107,86 @@ class ProjectedDistrict:
 
 def map_viewport_for_screen(screen_size: tuple[int, int]) -> MapViewport:
     width, height = screen_size
-    map_rect = pygame.Rect(40, 145, width - 80, height - 205)
-    min_x, min_y, max_x, max_y = _composite_extent()
-    composite_width = max_x - min_x
-    composite_height = max_y - min_y
-    scale = min(map_rect.width / composite_width, map_rect.height / composite_height)
+    map_rect = pygame.Rect(40, MAP_TOP, width - 80, height - MAP_TOP - 48)
+    return _viewport_for_composite_bounds(map_rect, _composite_extent())
+
+
+def map_viewport_for_state_detail(
+    state_abbrev: str, screen_size: tuple[int, int], *, panel_width: int = 380
+) -> tuple[MapViewport, pygame.Rect]:
+    """Fit a single state into the left portion of the screen."""
+    width, height = screen_size
+    map_rect = pygame.Rect(
+        24,
+        MAP_TOP,
+        width - panel_width - 48,
+        height - MAP_TOP - 40,
+    )
+    bounds = composite_bounds_for_state(state_abbrev)
+    viewport = _viewport_for_composite_bounds(map_rect, bounds, padding=0.1)
+    return viewport, map_rect
+
+
+def composite_bounds_for_state(state_abbrev: str) -> tuple[float, float, float, float]:
+    with STATES_GEOJSON_PATH.open(encoding="utf-8") as handle:
+        data = json.load(handle)
+    for feature in data["features"]:
+        if _state_abbrev(feature["properties"]["name"]) != state_abbrev:
+            continue
+        return _composite_bounds_for_geometry(feature["geometry"])
+    raise ValueError(f"Unknown state abbreviation: {state_abbrev}")
+
+
+def load_projected_state(viewport: MapViewport, state_abbrev: str) -> ProjectedState | None:
+    with STATES_GEOJSON_PATH.open(encoding="utf-8") as handle:
+        data = json.load(handle)
+    for feature in data["features"]:
+        if _state_abbrev(feature["properties"]["name"]) != state_abbrev:
+            continue
+        return _state_from_feature(feature, viewport)
+    return None
+
+
+def _viewport_for_composite_bounds(
+    map_rect: pygame.Rect,
+    bounds: tuple[float, float, float, float],
+    *,
+    padding: float = 0.0,
+) -> MapViewport:
+    min_x, min_y, max_x, max_y = bounds
+    composite_width = max(max_x - min_x, 1.0)
+    composite_height = max(max_y - min_y, 1.0)
+    inset = 1.0 - padding
+    scale = min(map_rect.width / composite_width, map_rect.height / composite_height) * inset
     scaled_width = composite_width * scale
     scaled_height = composite_height * scale
     left = map_rect.centerx - (min_x * scale + scaled_width / 2)
     top = map_rect.centery - (min_y * scale + scaled_height / 2)
     return MapViewport(left=left, top=top, scale=scale)
+
+
+def _composite_bounds_for_geometry(geometry: dict) -> tuple[float, float, float, float]:
+    min_x = min_y = float("inf")
+    max_x = max_y = float("-inf")
+    for ring in _extract_rings(geometry):
+        if _should_skip_ring(ring):
+            continue
+        for lon, lat in ring:
+            if _should_skip_coordinate(lon, lat):
+                continue
+            lon, lat = prepare_coordinates(lon, lat)
+            if lon > 1000:
+                continue
+            x, y = USA_COMPOSITE.project_lon_lat(lon, lat)
+            if _is_failed_projection(lon, lat, x, y):
+                continue
+            min_x = min(min_x, x)
+            min_y = min(min_y, y)
+            max_x = max(max_x, x)
+            max_y = max(max_y, y)
+    if min_x == float("inf"):
+        return _composite_extent()
+    return min_x, min_y, max_x, max_y
 
 
 def load_projected_states(viewport: MapViewport) -> list[ProjectedState]:
@@ -171,6 +244,43 @@ def load_projected_districts(
                 )
             )
     return districts
+
+
+def build_land_mask(
+    screen_size: tuple[int, int], viewport: MapViewport
+) -> pygame.Mask:
+    """Mask of US state land areas — clips district fill that bleeds into lakes."""
+    mask_surface = pygame.Surface(screen_size)
+    mask_surface.fill((0, 0, 0))
+    for state in load_projected_states(viewport):
+        for polygon in state.polygons:
+            pygame.draw.polygon(mask_surface, (255, 255, 255), polygon)
+    return pygame.mask.from_threshold(mask_surface, (255, 255, 255), (1, 1, 1))
+
+
+def apply_land_mask(
+    surface: pygame.Surface,
+    layer: pygame.Surface,
+    land_mask: pygame.Mask,
+    background: tuple[int, int, int],
+) -> None:
+    """Draw layer onto surface, keeping only pixels inside land_mask."""
+    if isinstance(background, pygame.Color):
+        background = (background.r, background.g, background.b)
+    masked = layer.copy()
+    mask_rgba = land_mask.to_surface(
+        setcolor=(255, 255, 255, 255),
+        unsetcolor=(0, 0, 0, 255),
+    )
+    masked.blit(mask_rgba, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+    surface.blit(masked, (0, 0))
+    outside = land_mask.copy()
+    outside.invert()
+    outside_rgba = outside.to_surface(
+        setcolor=(*background, 255),
+        unsetcolor=(0, 0, 0, 0),
+    )
+    surface.blit(outside_rgba, (0, 0))
 
 
 def label_point_for_polygons(

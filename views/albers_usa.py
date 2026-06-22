@@ -161,12 +161,10 @@ def prepare_coordinates(longitude_deg: float, latitude_deg: float) -> tuple[floa
 
 
 def _in_alaska_bounds(longitude_deg: float, latitude_deg: float) -> bool:
-    if not (50.5 <= latitude_deg <= 71.5232):
-        return False
-    longitude, _ = prepare_coordinates(longitude_deg, latitude_deg)
+    longitude, latitude = prepare_coordinates(longitude_deg, latitude_deg)
     if longitude > 1000.0:
         return False
-    return longitude <= -129.993
+    return ALASKA.geo_bounds.contains_point(longitude, latitude)
 
 
 USA_CONTINENTAL = GeoMap(
@@ -180,7 +178,7 @@ USA_CONTINENTAL = GeoMap(
 
 ALASKA = GeoMap(
     projection=AlbersMapProjection(-154.0, 50.0, 55.0, 65.0),
-    geo_bounds=GeoBounds(-180.0, -129.993, 50.5, 71.5232),
+    geo_bounds=GeoBounds(-180.0, -129.97, 50.5, 71.5232),
     display_x_scale=0.1301,
     display_y_scale=0.1311,
     display_x_offset=132.4555,

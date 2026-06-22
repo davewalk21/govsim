@@ -4,15 +4,16 @@
 ## Short Term
 # Chamber
 - make it look nicer, without overlapping
-- 
+- little ovals showing the associations in each (all Cali house members lumped together)
 
 # Map
 - drill-down on a state
     show the counties/voting districts
-- include a map for each of the 3:
-    1. Governers
-    2. Senators
-    3. House (this may be tough)
+- election map with total votes
+
+# Roster
+- clear
+- popup with detailed information if selected(include picture?)
 
 
 # Gameplay
@@ -75,6 +76,7 @@
         Live polls on opinions on policies and topics (+betting markets)
             There's some crazy methodology that could go into this, have a ground truth and include biases to different polls
 
+- NEMESIS SYSTEM????
 
 - Events
     Natural disasters

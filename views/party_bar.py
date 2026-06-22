@@ -15,6 +15,10 @@ def draw_party_bar(
     rect: pygame.Rect,
     counts: dict[Party, int],
     font: pygame.font.Font,
+    *,
+    total_label: str = "total",
+    votes_to_win: int | None = None,
+    total_votes: int | None = None,
 ) -> None:
     total = sum(counts.values())
     if total <= 0:
@@ -46,5 +50,18 @@ def draw_party_bar(
             surface.blit(label, label.get_rect(center=segment.center))
         x += width
 
-    total_label = font.render(f"{total} total", True, (170, 175, 190))
-    surface.blit(total_label, total_label.get_rect(midtop=(rect.centerx, rect.bottom + 4)))
+    if votes_to_win is not None and total_votes is not None and total_votes > 0:
+        win_x = rect.x + round(rect.width * votes_to_win / total_votes)
+        pygame.draw.line(
+            surface,
+            (240, 240, 245),
+            (win_x, rect.y - 2),
+            (win_x, rect.bottom + 2),
+            2,
+        )
+        win_label = font.render(str(votes_to_win), True, (200, 205, 215))
+        surface.blit(win_label, (win_x - win_label.get_width() // 2, rect.bottom + 6))
+
+    total_label_surface = font.render(f"{total} {total_label}", True, (170, 175, 190))
+    label_y = rect.bottom + (22 if votes_to_win is not None else 4)
+    surface.blit(total_label_surface, total_label_surface.get_rect(midtop=(rect.centerx, label_y)))

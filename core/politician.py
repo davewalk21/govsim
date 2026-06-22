@@ -4,15 +4,33 @@ from dataclasses import dataclass
 from enum import Enum
 
 from core.party import Party
+from core.traits import Gender, GovernmentValue, PolicyValue
 
 
 class Office(Enum):
     SENATE = "senate"
     HOUSE = "house"
     GOVERNOR = "governor"
+    COURT = "court"
 
 
-def build_title(office: Office, state: str, *, district: int | None = None, seat: int | None = None) -> str:
+OFFICE_LABELS = {
+    Office.SENATE: "Senator",
+    Office.HOUSE: "Representative",
+    Office.GOVERNOR: "Governor",
+    Office.COURT: "Justice",
+}
+
+
+def build_title(
+    office: Office,
+    state: str | None = None,
+    *,
+    district: int | None = None,
+    seat: int | None = None,
+) -> str:
+    if office == Office.COURT:
+        return str(seat)
     if office == Office.GOVERNOR:
         return f"{state}-G"
     if office == Office.SENATE:
@@ -31,9 +49,17 @@ class Politician:
     title: str
     party: Party
     office: Office
+    gender: Gender
+    age: int
+    policy: PolicyValue
+    government: GovernmentValue
     state: str | None = None
     district: int | None = None
     seat: int | None = None
+
+    @property
+    def role(self) -> str:
+        return OFFICE_LABELS[self.office]
 
     def cycle_party(self) -> None:
         from core.party import cycle_party

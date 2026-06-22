@@ -8,7 +8,9 @@ import pygame
 from core.party import BACKGROUND_COLOR, PARTY_COLORS, Party
 from core.politician import Politician
 from core.rosters import Roster
+from views.layout import DAIS_Y, LEGEND_Y, PARTY_BAR_Y, VIEW_TITLE_Y
 from views.party_bar import draw_party_bar, party_bar_rect
+from views.tooltip import draw_tooltip, politician_summary_lines
 
 SEAT_PADDING = 3
 
@@ -42,9 +44,10 @@ class ChamberView:
         self.font = pygame.font.SysFont(None, 22)
         self.title_font = pygame.font.SysFont(None, 36)
         width = screen_size[0]
-        self.bar_rect = party_bar_rect(width)
+        self.bar_rect = party_bar_rect(width, y=PARTY_BAR_Y)
         self.seats: list[Seat] = []
         self.seat_font = pygame.font.SysFont(None, 14)
+        self.hover_politician: Politician | None = None
         self._refresh_seats()
 
     def _refresh_seats(self) -> None:
@@ -89,7 +92,17 @@ class ChamberView:
     def party_counts(self) -> dict[Party, int]:
         return self.roster.party_counts()
 
+    def update_hover(self, pos: tuple[int, int]) -> None:
+        self.hover_politician = None
+        for seat in reversed(self.seats):
+            if seat.contains(pos):
+                self.hover_politician = self.roster.get(seat.politician_id)
+                break
+
     def handle_event(self, event: pygame.event.Event) -> None:
+        if event.type == pygame.MOUSEMOTION:
+            self.update_hover(event.pos)
+            return
         if event.type != pygame.MOUSEBUTTONDOWN or event.button != 1:
             return
         point = event.pos
@@ -104,9 +117,9 @@ class ChamberView:
         width, height = self.screen_size
 
         title = self.title_font.render(self.title, True, (230, 230, 235))
-        surface.blit(title, title.get_rect(midtop=(width // 2, 12)))
+        surface.blit(title, title.get_rect(midtop=(width // 2, VIEW_TITLE_Y)))
 
-        dais = pygame.Rect(width // 2 - 90, 52, 180, 36)
+        dais = pygame.Rect(width // 2 - 90, DAIS_Y, 180, 36)
         pygame.draw.rect(surface, (55, 58, 70), dais, border_radius=4)
         dais_label = self.font.render("Dais", True, (210, 210, 215))
         surface.blit(dais_label, dais_label.get_rect(center=dais.center))
@@ -130,8 +143,16 @@ class ChamberView:
 
         self._draw_legend(surface)
 
+        if self.hover_politician is not None:
+            draw_tooltip(
+                surface,
+                pygame.mouse.get_pos(),
+                politician_summary_lines(self.hover_politician),
+                self.font,
+            )
+
     def _draw_legend(self, surface: pygame.Surface) -> None:
-        x, y = self.screen_size[0] - 170, 16
+        x, y = self.screen_size[0] - 170, LEGEND_Y
         for party in (Party.DEMOCRAT, Party.REPUBLICAN, Party.INDEPENDENT):
             pygame.draw.circle(surface, PARTY_COLORS[party], (x, y + 8), 8)
             text = self.font.render(party.value.title(), True, (220, 220, 225))
@@ -246,3 +267,131 @@ def _distribute_seats(total: int, rows: int) -> list[int]:
     while sum(counts) < total:
         counts[-1] += 1
     return counts
+
+
+class BenchChamberView:
+    """Single-row bench layout for the Supreme Court (9 justices)."""
+
+    def __init__(
+        self,
+        title: str,
+        roster: Roster,
+        screen_size: tuple[int, int],
+    ) -> None:
+        self.title = title
+        self.roster = roster
+        self.screen_size = screen_size
+        self.font = pygame.font.SysFont(None, 22)
+        self.title_font = pygame.font.SysFont(None, 36)
+        self.seat_font = pygame.font.SysFont(None, 18)
+        width = screen_size[0]
+        self.bar_rect = party_bar_rect(width, y=PARTY_BAR_Y)
+        self.seats: list[Seat] = []
+        self.hover_politician: Politician | None = None
+        self._refresh_seats()
+
+    def _refresh_seats(self) -> None:
+        self.seats = self._build_seats()
+
+    def _build_seats(self) -> list[Seat]:
+        width, height = self.screen_size
+        count = len(self.roster.members)
+        ordered = sorted(self.roster.members, key=lambda member: member.seat or 0)
+        seat_radius = 26.0
+        bench_width = min(width * 0.78, 920)
+        start_x = (width - bench_width) / 2
+        spacing = bench_width / max(count - 1, 1)
+        center_y = height * 0.52
+
+        seats: list[Seat] = []
+        for index, politician in enumerate(ordered):
+            t = index / max(count - 1, 1)
+            x = start_x + index * spacing
+            arc_lift = math.sin(t * math.pi) * 36
+            position = pygame.Vector2(x, center_y - arc_lift)
+            seats.append(
+                Seat(
+                    index=index + 1,
+                    politician_id=politician.id,
+                    position=position,
+                    radius=seat_radius,
+                )
+            )
+        return seats
+
+    def party_counts(self) -> dict[Party, int]:
+        return self.roster.party_counts()
+
+    def update_hover(self, pos: tuple[int, int]) -> None:
+        self.hover_politician = None
+        for seat in reversed(self.seats):
+            if seat.contains(pos):
+                self.hover_politician = self.roster.get(seat.politician_id)
+                break
+
+    def handle_event(self, event: pygame.event.Event) -> None:
+        if event.type == pygame.MOUSEMOTION:
+            self.update_hover(event.pos)
+            return
+        if event.type != pygame.MOUSEBUTTONDOWN or event.button != 1:
+            return
+        for seat in reversed(self.seats):
+            if seat.contains(event.pos):
+                self.roster.cycle_member(seat.politician_id)
+                self._refresh_seats()
+                break
+
+    def draw(self, surface: pygame.Surface) -> None:
+        surface.fill(BACKGROUND_COLOR)
+        width, height = self.screen_size
+
+        title = self.title_font.render(self.title, True, (230, 230, 235))
+        surface.blit(title, title.get_rect(midtop=(width // 2, VIEW_TITLE_Y)))
+
+        self._draw_bench(surface)
+
+        draw_party_bar(surface, self.bar_rect, self.party_counts(), self.font)
+
+        hint = self.font.render(
+            "Click a seat to cycle blue → red → yellow", True, (150, 155, 170)
+        )
+        surface.blit(hint, (24, height - 28))
+
+        for seat in self.seats:
+            politician = self.roster.get(seat.politician_id)
+            color = PARTY_COLORS[politician.party]
+            pygame.draw.circle(surface, color, seat.position, int(seat.radius))
+            label = self.seat_font.render(politician.title, True, (245, 245, 245))
+            surface.blit(
+                label,
+                label.get_rect(center=(int(seat.position.x), int(seat.position.y))),
+            )
+
+        self._draw_legend(surface)
+
+        if self.hover_politician is not None:
+            draw_tooltip(
+                surface,
+                pygame.mouse.get_pos(),
+                politician_summary_lines(self.hover_politician),
+                self.font,
+            )
+
+    def _draw_bench(self, surface: pygame.Surface) -> None:
+        if not self.seats:
+            return
+        left = int(self.seats[0].position.x - self.seats[0].radius - 20)
+        right = int(self.seats[-1].position.x + self.seats[-1].radius + 20)
+        bench_y = int(max(seat.position.y for seat in self.seats) + self.seats[0].radius + 8)
+        bench_rect = pygame.Rect(left, bench_y, right - left, 28)
+        pygame.draw.rect(surface, (55, 58, 70), bench_rect, border_radius=4)
+        bench_label = self.font.render("Bench", True, (210, 210, 215))
+        surface.blit(bench_label, bench_label.get_rect(center=bench_rect.center))
+
+    def _draw_legend(self, surface: pygame.Surface) -> None:
+        x, y = self.screen_size[0] - 170, LEGEND_Y
+        for party in (Party.DEMOCRAT, Party.REPUBLICAN, Party.INDEPENDENT):
+            pygame.draw.circle(surface, PARTY_COLORS[party], (x, y + 8), 8)
+            text = self.font.render(party.value.title(), True, (220, 220, 225))
+            surface.blit(text, (x + 16, y))
+            y += 24

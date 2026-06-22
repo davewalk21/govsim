@@ -15,13 +15,17 @@ from core.party import (
 )
 from core.rosters import Roster
 from views.geo import (
+    apply_land_mask,
+    build_land_mask,
     load_projected_districts,
     load_projected_states,
     load_projected_territories,
     map_viewport_for_screen,
     point_in_polygon,
 )
+from views.layout import LEGEND_Y, PARTY_BAR_Y, VIEW_TITLE_Y
 from views.party_bar import draw_party_bar, party_bar_rect
+from views.tooltip import draw_tooltip, politician_summary_lines, politicians_summary_lines
 
 PARTY_LEGEND_ENTRIES = (
     (PARTY_COLORS[Party.DEMOCRAT], "Democrat"),
@@ -36,7 +40,7 @@ def _draw_map_legend(
     screen_size: tuple[int, int],
     extra_entries: tuple[tuple[pygame.Color, str], ...] = (),
 ) -> None:
-    x, y = screen_size[0] - 170, 16
+    x, y = screen_size[0] - 170, LEGEND_Y
     for color, label in (*PARTY_LEGEND_ENTRIES, *extra_entries):
         pygame.draw.circle(surface, color, (x, y + 8), 8)
         text = font.render(label, True, (220, 220, 225))
@@ -63,8 +67,22 @@ class GovernorMapView:
         self.font = pygame.font.SysFont(None, 22)
         self.label_font = pygame.font.SysFont(None, 16)
         self.title_font = pygame.font.SysFont(None, 36)
-        self.bar_rect = party_bar_rect(screen_size[0])
+        self.bar_rect = party_bar_rect(screen_size[0], y=PARTY_BAR_Y)
         self.states = self._load_governor_states()
+        self.hover_tooltip_lines: list[str] = []
+
+    def update_hover(self, pos: tuple[int, int]) -> None:
+        self.hover_tooltip_lines = []
+        for state in reversed(self.states):
+            if not state.contains(pos):
+                continue
+            if state.governor_id is None:
+                self.hover_tooltip_lines = [state.abbreviation, "No governor"]
+            else:
+                self.hover_tooltip_lines = politician_summary_lines(
+                    self.governors.get(state.governor_id)
+                )
+            return
 
     def _load_governor_states(self) -> list[StateRegion]:
         viewport = map_viewport_for_screen(self.screen_size)
@@ -91,6 +109,9 @@ class GovernorMapView:
         return self.governors.party_counts()
 
     def handle_event(self, event: pygame.event.Event) -> None:
+        if event.type == pygame.MOUSEMOTION:
+            self.update_hover(event.pos)
+            return
         if event.type != pygame.MOUSEBUTTONDOWN or event.button != 1:
             return
         for state in reversed(self.states):
@@ -104,7 +125,7 @@ class GovernorMapView:
         width, height = self.screen_size
 
         title = self.title_font.render("Governors Map", True, (230, 230, 235))
-        surface.blit(title, title.get_rect(midtop=(width // 2, 12)))
+        surface.blit(title, title.get_rect(midtop=(width // 2, VIEW_TITLE_Y)))
 
         draw_party_bar(surface, self.bar_rect, self.party_counts(), self.font)
 
@@ -126,6 +147,8 @@ class GovernorMapView:
                 surface.blit(label, label.get_rect(center=label_center))
 
         self._draw_legend(surface)
+        if self.hover_tooltip_lines:
+            draw_tooltip(surface, pygame.mouse.get_pos(), self.hover_tooltip_lines, self.font)
 
     def _draw_legend(self, surface: pygame.Surface) -> None:
         _draw_map_legend(surface, self.font, self.screen_size)
@@ -140,14 +163,32 @@ class SenateMapView:
         self.font = pygame.font.SysFont(None, 22)
         self.label_font = pygame.font.SysFont(None, 16)
         self.title_font = pygame.font.SysFont(None, 36)
-        self.bar_rect = party_bar_rect(screen_size[0])
+        self.bar_rect = party_bar_rect(screen_size[0], y=PARTY_BAR_Y)
         viewport = map_viewport_for_screen(screen_size)
         self.states = load_projected_states(viewport)
+        self.hover_tooltip_lines: list[str] = []
+
+    def update_hover(self, pos: tuple[int, int]) -> None:
+        self.hover_tooltip_lines = []
+        for state in reversed(self.states):
+            if not _state_contains(state, pos):
+                continue
+            senators = self.senate.senators_for_state(state.abbreviation)
+            if not senators:
+                self.hover_tooltip_lines = [state.abbreviation, "No senators"]
+            else:
+                self.hover_tooltip_lines = politicians_summary_lines(
+                    senators, heading=state.abbreviation
+                )
+            return
 
     def party_counts(self) -> dict[Party, int]:
         return self.senate.party_counts()
 
     def handle_event(self, event: pygame.event.Event) -> None:
+        if event.type == pygame.MOUSEMOTION:
+            self.update_hover(event.pos)
+            return
         if event.type != pygame.MOUSEBUTTONDOWN or event.button != 1:
             return
         for state in reversed(self.states):
@@ -164,7 +205,7 @@ class SenateMapView:
         width, height = self.screen_size
 
         title = self.title_font.render("Senate Map", True, (230, 230, 235))
-        surface.blit(title, title.get_rect(midtop=(width // 2, 12)))
+        surface.blit(title, title.get_rect(midtop=(width // 2, VIEW_TITLE_Y)))
 
         draw_party_bar(surface, self.bar_rect, self.party_counts(), self.font)
 
@@ -187,6 +228,8 @@ class SenateMapView:
                 surface.blit(label, label.get_rect(center=state.label_point))
 
         self._draw_legend(surface)
+        if self.hover_tooltip_lines:
+            draw_tooltip(surface, pygame.mouse.get_pos(), self.hover_tooltip_lines, self.font)
 
     def _draw_legend(self, surface: pygame.Surface) -> None:
         _draw_map_legend(
@@ -206,10 +249,28 @@ class HouseMapView:
         self.font = pygame.font.SysFont(None, 22)
         self.label_font = pygame.font.SysFont(None, 18)
         self.title_font = pygame.font.SysFont(None, 36)
-        self.bar_rect = party_bar_rect(screen_size[0])
+        self.bar_rect = party_bar_rect(screen_size[0], y=PARTY_BAR_Y)
         self.districts = self._load_districts()
         viewport = map_viewport_for_screen(screen_size)
         self.territories = load_projected_territories(viewport, {"Puerto Rico"})
+        self.land_mask = build_land_mask(screen_size, viewport)
+        self.hover_tooltip_lines: list[str] = []
+
+    def _on_land(self, pos: tuple[int, int]) -> bool:
+        x, y = pos
+        if x < 0 or y < 0 or x >= self.screen_size[0] or y >= self.screen_size[1]:
+            return False
+        return bool(self.land_mask.get_at(pos))
+
+    def update_hover(self, pos: tuple[int, int]) -> None:
+        self.hover_tooltip_lines = []
+        if not self._on_land(pos):
+            return
+        for district in reversed(self.districts):
+            if district.contains(pos):
+                politician = self.house.get(district.politician_id)
+                self.hover_tooltip_lines = politician_summary_lines(politician)
+                return
 
     def _load_districts(self):
         viewport = map_viewport_for_screen(self.screen_size)
@@ -224,7 +285,12 @@ class HouseMapView:
         return self.house.party_counts()
 
     def handle_event(self, event: pygame.event.Event) -> None:
+        if event.type == pygame.MOUSEMOTION:
+            self.update_hover(event.pos)
+            return
         if event.type != pygame.MOUSEBUTTONDOWN or event.button != 1:
+            return
+        if not self._on_land(event.pos):
             return
         for district in reversed(self.districts):
             if district.contains(event.pos):
@@ -235,15 +301,15 @@ class HouseMapView:
         surface.fill(BACKGROUND_COLOR)
         width, height = self.screen_size
 
-        title = self.title_font.render("House Map", True, (230, 230, 235))
-        surface.blit(title, title.get_rect(midtop=(width // 2, 12)))
-
-        draw_party_bar(surface, self.bar_rect, self.party_counts(), self.font)
-
-        hint = self.font.render(
-            "Click a district to cycle blue → red → yellow", True, (150, 155, 170)
-        )
-        surface.blit(hint, (24, height - 28))
+        district_layer = pygame.Surface(self.screen_size)
+        district_layer.fill(BACKGROUND_COLOR)
+        for district in self.districts:
+            politician = self.house.get(district.politician_id)
+            color = PARTY_COLORS[politician.party]
+            for polygon in district.polygons:
+                pygame.draw.polygon(district_layer, color, polygon)
+                pygame.draw.polygon(district_layer, (45, 48, 58), polygon, 1)
+        apply_land_mask(surface, district_layer, self.land_mask, BACKGROUND_COLOR)
 
         for territory in self.territories:
             for polygon in territory.polygons:
@@ -255,14 +321,19 @@ class HouseMapView:
                 )
                 surface.blit(label, label.get_rect(center=territory.label_point))
 
-        for district in self.districts:
-            politician = self.house.get(district.politician_id)
-            color = PARTY_COLORS[politician.party]
-            for polygon in district.polygons:
-                pygame.draw.polygon(surface, color, polygon)
-                pygame.draw.polygon(surface, (45, 48, 58), polygon, 1)
+        title = self.title_font.render("House Map", True, (230, 230, 235))
+        surface.blit(title, title.get_rect(midtop=(width // 2, VIEW_TITLE_Y)))
+
+        draw_party_bar(surface, self.bar_rect, self.party_counts(), self.font)
+
+        hint = self.font.render(
+            "Click a district to cycle blue → red → yellow", True, (150, 155, 170)
+        )
+        surface.blit(hint, (24, height - 28))
 
         self._draw_legend(surface)
+        if self.hover_tooltip_lines:
+            draw_tooltip(surface, pygame.mouse.get_pos(), self.hover_tooltip_lines, self.font)
 
     def _draw_legend(self, surface: pygame.Surface) -> None:
         _draw_map_legend(surface, self.font, self.screen_size)
