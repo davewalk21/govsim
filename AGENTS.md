@@ -60,11 +60,13 @@ Controls: dropdown (top-left) or keys **1–6** (`senate_chamber`, `senate_map`,
 
 ## Coding guidelines
 
-- **Python 3.8+** compatible (venv may be 3.8). Use `from __future__ import annotations` for modern type hints.
+- Use type hints
+- Use sphinx docstrings
+- Use Ruff-style formatting and best practices
 - **Keep changes focused** — match existing style; don't over-abstract.
 - **File encoding: UTF-8 only.** On Windows, `.py` files must be saved as UTF-8 (not UTF-16). Check Cursor status bar before saving. Project has `.editorconfig` and `.vscode/settings.json` enforcing this.
 - When writing files programmatically on Windows, verify encoding (UTF-8 bytes should start with ASCII like `69 6D 70 6F 72 74` for `import`, not `69 00 6D 00`).
-- Do not commit `.venv/`.
+- Do not commit items in `.gitignore`
 
 ## Common tasks
 
