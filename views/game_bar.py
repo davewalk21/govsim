@@ -5,7 +5,7 @@ import pygame
 from views.home_button import HOME_BUTTON_WIDTH, draw_home_button
 from views.layout import NAV_BOTTOM, NAV_HEIGHT, NAV_Y
 
-NEXT_TURN_WIDTH = 120
+NEXT_TURN_WIDTH = 130
 NEXT_TURN_HEIGHT = NAV_HEIGHT
 HOME_GAP = 8
 
@@ -32,12 +32,20 @@ class ElectionGameBar:
         )
         self.countdown_text = ""
         self.button_enabled = True
+        self.button_label = "Next Turn"
         self.pending_next_turn = False
         self.pending_home = False
 
-    def set_countdown(self, text: str, *, button_enabled: bool = True) -> None:
+    def set_countdown(
+        self,
+        text: str,
+        *,
+        button_enabled: bool = True,
+        button_label: str = "Next Turn",
+    ) -> None:
         self.countdown_text = text
         self.button_enabled = button_enabled
+        self.button_label = button_label
 
     def handle_event(self, event: pygame.event.Event) -> bool:
         if event.type != pygame.MOUSEBUTTONDOWN or event.button != 1:
@@ -87,5 +95,5 @@ class ElectionGameBar:
             border = (70, 75, 90)
         pygame.draw.rect(surface, fill, self.next_turn_rect, border_radius=6)
         pygame.draw.rect(surface, border, self.next_turn_rect, 1, border_radius=6)
-        label = self.button_font.render("Next Turn", True, (240, 240, 245))
+        label = self.button_font.render(self.button_label, True, (240, 240, 245))
         surface.blit(label, label.get_rect(center=self.next_turn_rect.center))

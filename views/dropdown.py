@@ -60,23 +60,10 @@ class Dropdown:
         return self.open
 
     def draw(self, surface: pygame.Surface) -> None:
-        if self.open:
-            menu_rect = self._menu_rect()
-            pygame.draw.rect(surface, (38, 42, 54), menu_rect, border_radius=6)
-            pygame.draw.rect(surface, (90, 98, 120), menu_rect, 1, border_radius=6)
+        self.draw_button(surface)
+        self.draw_menu(surface)
 
-            for index, (label, key) in enumerate(self.options):
-                row = pygame.Rect(
-                    menu_rect.x,
-                    menu_rect.y + index * self.row_height,
-                    menu_rect.width,
-                    self.row_height,
-                )
-                if key == self.selected_key:
-                    pygame.draw.rect(surface, (55, 62, 82), row)
-                text = self.font.render(label, True, (235, 235, 240))
-                surface.blit(text, (row.x + 12, row.y + 7))
-
+    def draw_button(self, surface: pygame.Surface) -> None:
         pygame.draw.rect(surface, (45, 50, 64), self.rect, border_radius=6)
         pygame.draw.rect(surface, (110, 118, 140), self.rect, 1, border_radius=6)
 
@@ -85,6 +72,25 @@ class Dropdown:
 
         arrow = self.font.render("v" if not self.open else "^", True, (180, 185, 200))
         surface.blit(arrow, (self.rect.right - 22, self.rect.y + 7))
+
+    def draw_menu(self, surface: pygame.Surface) -> None:
+        if not self.open:
+            return
+        menu_rect = self._menu_rect()
+        pygame.draw.rect(surface, (38, 42, 54), menu_rect, border_radius=6)
+        pygame.draw.rect(surface, (90, 98, 120), menu_rect, 1, border_radius=6)
+
+        for index, (label, key) in enumerate(self.options):
+            row = pygame.Rect(
+                menu_rect.x,
+                menu_rect.y + index * self.row_height,
+                menu_rect.width,
+                self.row_height,
+            )
+            if key == self.selected_key:
+                pygame.draw.rect(surface, (55, 62, 82), row)
+            text = self.font.render(label, True, (235, 235, 240))
+            surface.blit(text, (row.x + 12, row.y + 7))
 
     def _menu_rect(self) -> pygame.Rect:
         return pygame.Rect(

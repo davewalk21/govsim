@@ -6,6 +6,8 @@ import pygame
 
 from core.election import PresidentialElection
 from core.government import Government
+from core.party import Party
+from views.campaign_setup import CampaignSetupScreen
 from views.chamber import BenchChamberView, ChamberView
 from views.election_map import ElectionCampaignView
 from views.game_bar import ElectionGameBar
@@ -20,6 +22,7 @@ FPS = 60
 
 class AppMode(Enum):
     HOME = "home"
+    CAMPAIGN_SETUP = "campaign_setup"
     DEV = "dev"
     ELECTION = "election"
 
@@ -29,6 +32,7 @@ class App:
         self.screen_size = screen_size
         self.mode = AppMode.HOME
         self.home = HomeScreen(screen_size)
+        self.campaign_setup = CampaignSetupScreen(screen_size)
         self.government: Government | None = None
         self.navigator: ViewNavigator | None = None
         self.views: dict | None = None
@@ -74,8 +78,19 @@ class App:
         self.election_view = None
         self.game_bar = None
 
-    def start_new_game(self) -> None:
-        self.election = PresidentialElection.create_new()
+    def start_new_game(
+        self,
+        player_party: Party,
+        dem_platform: dict[str, float],
+        rep_platform: dict[str, float],
+    ) -> None:
+        player_promises = dem_platform if player_party == Party.DEMOCRAT else rep_platform
+        opponent_promises = rep_platform if player_party == Party.DEMOCRAT else dem_platform
+        self.election = PresidentialElection.create_new(
+            player_party=player_party,
+            player_promises=player_promises,
+            opponent_promises=opponent_promises,
+        )
         self.election_view = ElectionCampaignView(self.screen_size, self.election)
         self.game_bar = ElectionGameBar(self.screen_size)
         self._sync_election_bar()
@@ -86,7 +101,8 @@ class App:
             return
         self.game_bar.set_countdown(
             self.election.countdown_label(),
-            button_enabled=not self.election.resolved,
+            button_enabled=self.election.button_enabled(),
+            button_label=self.election.button_label(),
         )
 
     def handle_event(self, event: pygame.event.Event) -> bool:
@@ -99,12 +115,25 @@ class App:
             action = self.home.pending_action
             if action == "new_game":
                 self.home.pending_action = None
-                self.start_new_game()
+                self.campaign_setup.reset()
+                self.mode = AppMode.CAMPAIGN_SETUP
             elif action == "dev_mode":
                 self.home.pending_action = None
                 self.start_dev_mode()
             elif action == "exit":
                 return False
+            return True
+
+        if self.mode == AppMode.CAMPAIGN_SETUP:
+            self.campaign_setup.handle_event(event)
+            if self.campaign_setup.consume_back():
+                self.mode = AppMode.HOME
+                return True
+            start_config = self.campaign_setup.consume_start()
+            if start_config:
+                player_party, dem_platform, rep_platform = start_config
+                self.start_new_game(player_party, dem_platform, rep_platform)
+                self.mode = AppMode.ELECTION
             return True
 
         if self.mode == AppMode.ELECTION:
@@ -113,7 +142,12 @@ class App:
                     self.go_home()
                     return True
                 if self.game_bar.consume_next_turn() and self.election:
-                    self.election.next_turn()
+                    if self.election.on_election_day:
+                        self.election.start_reveal()
+                        if self.election_view:
+                            self.election_view.reset_state_filter()
+                    else:
+                        self.election.next_turn()
                     self._sync_election_bar()
                 return True
             if self.election_view and self.election_view.handle_event(event):
@@ -146,10 +180,15 @@ class App:
         if self.mode == AppMode.ELECTION and self.election_view:
             if hasattr(self.election_view, "update_hover"):
                 self.election_view.update_hover(mouse_pos)
+        if self.mode == AppMode.ELECTION and self.election and self.election.revealing:
+            if self.election.tick_reveal(pygame.time.get_ticks()):
+                self._sync_election_bar()
 
     def draw(self, surface: pygame.Surface) -> None:
         if self.mode == AppMode.HOME:
             self.home.draw(surface)
+        elif self.mode == AppMode.CAMPAIGN_SETUP:
+            self.campaign_setup.draw(surface)
         elif self.mode == AppMode.ELECTION:
             assert self.election_view is not None and self.game_bar is not None
             self.election_view.draw(surface)

@@ -58,6 +58,14 @@ def generate_state_opinions(lean: Party) -> StateOpinions:
     )
 
 
+def generate_party_platform(party: Party) -> dict[str, float]:
+    return {policy.id: random_opinion_score(party) for policy in POLICIES}
+
+
+def generate_campaign_platforms() -> tuple[dict[str, float], dict[str, float]]:
+    return generate_party_platform(Party.DEMOCRAT), generate_party_platform(Party.REPUBLICAN)
+
+
 def default_player_promises() -> dict[str, float]:
     return {policy.id: 50.0 for policy in POLICIES}
 

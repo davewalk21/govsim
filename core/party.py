@@ -24,6 +24,7 @@ PARTY_COLORS: dict[Party, pygame.Color] = {
 
 SPLIT_STATE_COLOR = pygame.Color(140, 80, 180)
 NO_DELEGATION_COLOR = pygame.Color(55, 58, 70)
+UNDECIDED_ELECTION_COLOR = pygame.Color(72, 76, 88)
 
 
 def color_for_senate_delegation(parties: list[Party]) -> pygame.Color:
@@ -125,6 +126,20 @@ def poll_gradient_color(dem_pct: float, rep_pct: float, *, strength: float = 0.5
         int(bg[0] + strength * (base.r - bg[0])),
         int(bg[1] + strength * (base.g - bg[1])),
         int(bg[2] + strength * (base.b - bg[2])),
+    )
+
+
+def competitiveness_map_color(tier: "CompetitivenessTier") -> pygame.Color:
+    """Map fill from Safe Dem (full blue) through Toss-up to Safe Rep (full red)."""
+    from core.electorate import CompetitivenessTier
+
+    dem = PARTY_COLORS[Party.DEMOCRAT]
+    rep = PARTY_COLORS[Party.REPUBLICAN]
+    blend = tier.value / (CompetitivenessTier.SAFE_REP.value)
+    return pygame.Color(
+        int(dem.r + (rep.r - dem.r) * blend),
+        int(dem.g + (rep.g - dem.g) * blend),
+        int(dem.b + (rep.b - dem.b) * blend),
     )
 
 

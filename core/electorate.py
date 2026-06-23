@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
+from enum import IntEnum
 
 from core.party import Party
 from core.states import STATE_POPULATION, US_STATE_ABBREVS
@@ -24,6 +25,80 @@ TWO_PARTY_DEM_SHARE = {
 TWO_PARTY_SHARE_SIGMA = 0.035
 POLL_MARGIN_RANGE = (3.0, 6.5)
 POLL_NOISE_SIGMA = 2.0
+
+
+class CompetitivenessTier(IntEnum):
+    SAFE_DEM = 0
+    LIKELY_DEM = 1
+    LEANS_DEM = 2
+    TILT_DEM = 3
+    TOSS_UP = 4
+    TILT_REP = 5
+    LEANS_REP = 6
+    LIKELY_REP = 7
+    SAFE_REP = 8
+
+
+TIER_LABELS: dict[CompetitivenessTier, str] = {
+    CompetitivenessTier.SAFE_DEM: "Safe Dem",
+    CompetitivenessTier.LIKELY_DEM: "Likely Dem",
+    CompetitivenessTier.LEANS_DEM: "Leans Dem",
+    CompetitivenessTier.TILT_DEM: "Tilt Dem",
+    CompetitivenessTier.TOSS_UP: "Toss-up",
+    CompetitivenessTier.TILT_REP: "Tilt Rep",
+    CompetitivenessTier.LEANS_REP: "Leans Rep",
+    CompetitivenessTier.LIKELY_REP: "Likely Rep",
+    CompetitivenessTier.SAFE_REP: "Safe Rep",
+}
+
+DEM_TIERS = frozenset(
+    {
+        CompetitivenessTier.SAFE_DEM,
+        CompetitivenessTier.LIKELY_DEM,
+        CompetitivenessTier.LEANS_DEM,
+        CompetitivenessTier.TILT_DEM,
+    }
+)
+REP_TIERS = frozenset(
+    {
+        CompetitivenessTier.SAFE_REP,
+        CompetitivenessTier.LIKELY_REP,
+        CompetitivenessTier.LEANS_REP,
+        CompetitivenessTier.TILT_REP,
+    }
+)
+
+
+def tier_matches_filter(tier: CompetitivenessTier, filter_key: str) -> bool:
+    if filter_key == "all":
+        return True
+    if filter_key == "swing":
+        return tier == CompetitivenessTier.TOSS_UP
+    if filter_key == "dem":
+        return tier in DEM_TIERS
+    if filter_key == "rep":
+        return tier in REP_TIERS
+    return True
+
+
+def tier_from_margin(leader: Party, margin: float) -> CompetitivenessTier:
+    if margin < 2.0:
+        return CompetitivenessTier.TOSS_UP
+    if leader == Party.DEMOCRAT:
+        if margin >= 10.0:
+            return CompetitivenessTier.SAFE_DEM
+        if margin >= 7.0:
+            return CompetitivenessTier.LIKELY_DEM
+        if margin >= 4.0:
+            return CompetitivenessTier.LEANS_DEM
+        return CompetitivenessTier.TILT_DEM
+    if margin >= 10.0:
+        return CompetitivenessTier.SAFE_REP
+    if margin >= 7.0:
+        return CompetitivenessTier.LIKELY_REP
+    if margin >= 4.0:
+        return CompetitivenessTier.LEANS_REP
+    return CompetitivenessTier.TILT_REP
 
 
 @dataclass
@@ -99,21 +174,32 @@ class StateElectorate:
         leader = Party.DEMOCRAT if dem >= rep else Party.REPUBLICAN
         return leader, abs(dem - rep)
 
-    def competitiveness_summary(self) -> str:
-        """Rating label from two-party split: Safe/Likely/Leans/Tilt or Toss-up."""
+    def competitiveness_tier(self) -> CompetitivenessTier:
         leader, margin = self.two_party_margin()
-        if margin < 2.0:
-            return "Toss-up"
-        if margin >= 10.0:
-            tier = "Safe"
-        elif margin >= 7.0:
-            tier = "Likely"
-        elif margin >= 4.0:
-            tier = "Leans"
-        else:
-            tier = "Tilt"
-        party_name = "Democratic" if leader == Party.DEMOCRAT else "Republican"
-        return f"{tier} {party_name}"
+        return tier_from_margin(leader, margin)
+
+    def competitiveness_summary(self) -> str:
+        return TIER_LABELS[self.competitiveness_tier()]
+
+
+@dataclass
+class StateElectionResult:
+    party: Party
+    actual_turnout: float
+    dem_votes: int
+    rep_votes: int
+    ind_votes: int
+    other_votes: int
+
+
+def apply_state_election_result(
+    electorate: StateElectorate, result: StateElectionResult
+) -> None:
+    electorate.actual_turnout = result.actual_turnout
+    electorate.result_dem_votes = result.dem_votes
+    electorate.result_rep_votes = result.rep_votes
+    electorate.result_ind_votes = result.ind_votes
+    electorate.result_other_votes = result.other_votes
 
 
 def _split_eligible_voters(eligible: int, lean: Party) -> tuple[int, int, int, int]:
@@ -191,11 +277,10 @@ def _sample_within_margin(center: float, margin: float) -> float:
     return max(center - margin, min(center + margin, value))
 
 
-def simulate_state_election(electorate: StateElectorate) -> Party:
+def simulate_state_election(electorate: StateElectorate) -> StateElectionResult:
     turnout_margin = electorate.efficacy * (electorate.poll_margin / 100.0)
     actual_turnout = _sample_within_margin(electorate.efficacy, turnout_margin)
     actual_turnout = max(0.35, min(0.85, actual_turnout))
-    electorate.actual_turnout = actual_turnout
     voting = int(round(electorate.eligible_voters * actual_turnout))
 
     margin = electorate.poll_margin
@@ -216,14 +301,16 @@ def simulate_state_election(electorate: StateElectorate) -> Party:
     ind_pct *= scale
     other_pct *= scale
 
-    electorate.result_dem_votes = int(round(voting * dem_pct / 100.0))
-    electorate.result_rep_votes = int(round(voting * rep_pct / 100.0))
-    electorate.result_ind_votes = int(round(voting * ind_pct / 100.0))
-    electorate.result_other_votes = max(
-        0,
-        voting
-        - electorate.result_dem_votes
-        - electorate.result_rep_votes
-        - electorate.result_ind_votes,
+    dem_votes = int(round(voting * dem_pct / 100.0))
+    rep_votes = int(round(voting * rep_pct / 100.0))
+    ind_votes = int(round(voting * ind_pct / 100.0))
+    other_votes = max(0, voting - dem_votes - rep_votes - ind_votes)
+    party = Party.DEMOCRAT if dem_votes >= rep_votes else Party.REPUBLICAN
+    return StateElectionResult(
+        party=party,
+        actual_turnout=actual_turnout,
+        dem_votes=dem_votes,
+        rep_votes=rep_votes,
+        ind_votes=ind_votes,
+        other_votes=other_votes,
     )
-    return electorate.projected_winner()
