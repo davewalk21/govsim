@@ -3,6 +3,7 @@ from __future__ import annotations
 import pygame
 
 from core.election import PresidentialElection
+from core.electorate import RALLY_COST
 from core.party import (
     BACKGROUND_COLOR,
     NO_DELEGATION_COLOR,
@@ -58,6 +59,10 @@ BACK_BUTTON_HEIGHT = 32
 VIEW_DROPDOWN_WIDTH = 140
 DROPDOWN_GAP = 4
 FILTER_DIM_STRENGTH = 0.22
+RALLY_BUTTON_WIDTH = 148
+RALLY_BUTTON_HEIGHT = 40
+RALLY_STATE_CHIP_WIDTH = 36
+CAMPAIGN_BUTTON_GAP = 8
 
 
 def _dim_color(color: pygame.Color, strength: float = FILTER_DIM_STRENGTH) -> pygame.Color:
@@ -132,6 +137,43 @@ class ElectionCampaignView:
         self.hover_tooltip_lines: list[str] = []
         self._mouse_pos: tuple[int, int] = (0, 0)
         self.state_detail_panel = StateDetailPanel(screen_size)
+        self.campaign_select_mode: str | None = None
+        self._campaign_hover_state: str | None = None
+        self._layout_campaign_buttons()
+
+    def _layout_campaign_buttons(self) -> None:
+        dropdown_x = 24
+        dropdown_y = NAV_BOTTOM + 8
+        filter_menu_bottom = (
+            dropdown_y
+            + NAV_HEIGHT
+            + DROPDOWN_GAP
+            + NAV_HEIGHT
+            + 4
+            + len(STATE_FILTER_OPTIONS) * 34
+            + 24
+        )
+        block_height = RALLY_BUTTON_HEIGHT * 2 + CAMPAIGN_BUTTON_GAP
+        map_vertical_center = (self._map_click_top + self.screen_size[1] - 48) // 2
+        block_top = max(filter_menu_bottom, map_vertical_center - block_height // 2)
+        rally_y = block_top
+        ads_y = block_top + RALLY_BUTTON_HEIGHT + CAMPAIGN_BUTTON_GAP
+        self.rally_button_rect = pygame.Rect(
+            dropdown_x, rally_y, RALLY_BUTTON_WIDTH, RALLY_BUTTON_HEIGHT
+        )
+        self.ads_button_rect = pygame.Rect(
+            dropdown_x, ads_y, RALLY_BUTTON_WIDTH, RALLY_BUTTON_HEIGHT
+        )
+        self.rally_state_chip_rect = pygame.Rect(
+            dropdown_x + RALLY_BUTTON_WIDTH + 8,
+            rally_y + 4,
+            RALLY_STATE_CHIP_WIDTH,
+            RALLY_BUTTON_HEIGHT - 8,
+        )
+
+    def _close_dropdowns(self) -> None:
+        self.view_dropdown.open = False
+        self.filter_dropdown.open = False
 
     def _ev_line(self, state_abbrev: str) -> str:
         ev = ELECTORAL_VOTES_BY_STATE[state_abbrev]
@@ -148,6 +190,22 @@ class ElectionCampaignView:
         self.state_filter = "all"
         self.filter_dropdown.set_selected("all")
         self.filter_dropdown.open = False
+
+    def reset_campaign_ui(self) -> None:
+        self.campaign_select_mode = None
+        self._campaign_hover_state = None
+
+    def reset_rally_ui(self) -> None:
+        self.reset_campaign_ui()
+
+    def _show_campaign_controls(self) -> bool:
+        return (
+            self.main_view == "map"
+            and self.selected_state is None
+            and not self.election.revealing
+            and not self.election.resolved
+            and self.election.days_remaining > 0
+        )
 
     def _state_matches_filter(self, state_abbrev: str) -> bool:
         if not self._filter_active():
@@ -183,6 +241,7 @@ class ElectionCampaignView:
     def update_hover(self, mouse_pos: tuple[int, int]) -> None:
         self._mouse_pos = mouse_pos
         self.hover_tooltip_lines = []
+        self._campaign_hover_state = None
         if self.selected_state is not None or self.main_view != "map":
             return
         if mouse_pos[1] < self._map_click_top:
@@ -190,6 +249,9 @@ class ElectionCampaignView:
         for state in reversed(self.states):
             if not self._has_electorate(state.abbreviation) or not state.contains(mouse_pos):
                 continue
+            if self.campaign_select_mode in ("rally", "ads"):
+                self._campaign_hover_state = state.abbreviation
+                return
             electorate = self.election.electorates[state.abbreviation]
             name = STATE_ABBREV_TO_NAME.get(state.abbreviation, state.abbreviation)
             ev_line = self._ev_line(state.abbreviation)
@@ -225,12 +287,54 @@ class ElectionCampaignView:
                 return True
             return False
 
+        if (
+            event.type == pygame.MOUSEBUTTONDOWN
+            and event.button == 1
+            and self.main_view == "map"
+        ):
+            if self._show_campaign_controls() and self.rally_button_rect.collidepoint(event.pos):
+                if self.election.can_schedule_rally():
+                    self.campaign_select_mode = (
+                        None if self.campaign_select_mode == "rally" else "rally"
+                    )
+                    self._close_dropdowns()
+                return True
+
+            if self._show_campaign_controls() and self.ads_button_rect.collidepoint(event.pos):
+                if self.election.can_enter_ads_mode():
+                    self.campaign_select_mode = (
+                        None if self.campaign_select_mode == "ads" else "ads"
+                    )
+                    self._close_dropdowns()
+                return True
+
+            if self.campaign_select_mode and event.pos[1] >= self._map_click_top:
+                if not self.bar_rect.collidepoint(event.pos) and not self._currency_rect.collidepoint(
+                    event.pos
+                ):
+                    for state in reversed(self.states):
+                        if not self._has_electorate(state.abbreviation):
+                            continue
+                        if state.contains(event.pos):
+                            if self.campaign_select_mode == "rally":
+                                self.election.schedule_rally(state.abbreviation)
+                                self.campaign_select_mode = None
+                            elif self.campaign_select_mode == "ads":
+                                multi = bool(pygame.key.get_mods() & pygame.KMOD_CTRL)
+                                self.election.select_ad_state(state.abbreviation, multi=multi)
+                            return True
+                    return True
+
         if self.view_dropdown.handle_event(event):
             self.main_view = self.view_dropdown.selected_key
+            if self.campaign_select_mode:
+                self.campaign_select_mode = None
             return True
 
         if self.main_view == "map" and self._show_state_filter() and self.filter_dropdown.handle_event(event):
             self.state_filter = self.filter_dropdown.selected_key
+            if self.campaign_select_mode:
+                self.campaign_select_mode = None
             return True
 
         if self.main_view == "policy":
@@ -319,6 +423,8 @@ class ElectionCampaignView:
 
         self._draw_legend(surface)
         self._draw_dropdowns(surface)
+        if self._show_campaign_controls():
+            self._draw_campaign_buttons(surface)
 
         draw_currency_block(
             surface,
@@ -337,11 +443,20 @@ class ElectionCampaignView:
         if self.election.resolved:
             self._draw_player_outcome_banner(surface)
         elif not self.election.revealing:
-            hint = self.font.render(
-                "Click a state for opinions · Next Turn to advance the campaign",
-                True,
-                (150, 155, 170),
-            )
+            if self.campaign_select_mode == "rally":
+                hint = self.font.render("Click a state to schedule your rally", True, (150, 155, 170))
+            elif self.campaign_select_mode == "ads":
+                hint = self.font.render(
+                    "Click states for ads · Ctrl+click to select multiple",
+                    True,
+                    (150, 155, 170),
+                )
+            else:
+                hint = self.font.render(
+                    "Click a state for opinions · Next Turn to advance the campaign",
+                    True,
+                    (150, 155, 170),
+                )
             surface.blit(hint, hint.get_rect(midbottom=(width // 2, height - 20)))
 
     def _draw_map_header(self, surface: pygame.Surface) -> None:
@@ -449,12 +564,44 @@ class ElectionCampaignView:
                     pygame.draw.polygon(surface, (70, 75, 90), polygon, 1)
                 continue
             fill = _state_fill_color(self.election, state.abbreviation)
+            highlight = self._state_campaign_highlight(state.abbreviation)
+            if self.campaign_select_mode and highlight not in (
+                "hover",
+                "rally_scheduled",
+                "ad_scheduled",
+            ):
+                fill = _dim_color(fill, strength=0.12)
             if not self._state_matches_filter(state.abbreviation):
                 fill = _dim_color(fill)
             label_color = (235, 235, 240) if self._state_matches_filter(state.abbreviation) else (100, 105, 120)
+            border_color = (70, 75, 90)
+            border_width = 1
+            if highlight == "rally_scheduled":
+                border_color = (255, 220, 90)
+                border_width = 4
+            elif highlight == "ad_scheduled":
+                border_color = (100, 200, 255)
+                border_width = 4
+            elif highlight == "hover":
+                border_color = (180, 220, 255)
+                border_width = 3
             for polygon in state.polygons:
                 pygame.draw.polygon(surface, fill, polygon)
-                pygame.draw.polygon(surface, (70, 75, 90), polygon, 1)
+                pygame.draw.polygon(surface, border_color, polygon, border_width)
+                if highlight == "rally_scheduled":
+                    tint = pygame.Color(
+                        min(255, fill.r + 35),
+                        min(255, fill.g + 35),
+                        min(255, fill.b + 20),
+                    )
+                    pygame.draw.polygon(surface, tint, polygon, 2)
+                elif highlight == "ad_scheduled":
+                    tint = pygame.Color(
+                        min(255, fill.r + 20),
+                        min(255, fill.g + 40),
+                        min(255, fill.b + 50),
+                    )
+                    pygame.draw.polygon(surface, tint, polygon, 2)
 
             if state.label_point:
                 label = self.label_font.render(state.abbreviation, True, label_color)
@@ -490,6 +637,87 @@ class ElectionCampaignView:
             seg_y = y + tier.value * 14
             text = self.label_font.render(TIER_LABELS[tier], True, (200, 205, 215))
             surface.blit(text, (label_x, seg_y + 1))
+
+    def _state_campaign_highlight(self, state_abbrev: str) -> str | None:
+        if self.election.scheduled_rally_state == state_abbrev:
+            return "rally_scheduled"
+        if state_abbrev in self.election.scheduled_ad_states:
+            return "ad_scheduled"
+        if self.campaign_select_mode and self._campaign_hover_state == state_abbrev:
+            return "hover"
+        return None
+
+    def _draw_campaign_buttons(self, surface: pygame.Surface) -> None:
+        self._draw_action_button(
+            surface,
+            self.rally_button_rect,
+            "Hold a Rally",
+            "$50k",
+            enabled=self.election.can_schedule_rally(),
+            selecting=self.campaign_select_mode == "rally",
+            active_fill=(70, 85, 55),
+            active_border=(160, 200, 120),
+        )
+        scheduled = self.election.scheduled_rally_state
+        if scheduled:
+            chip = self.rally_state_chip_rect
+            pygame.draw.rect(surface, (55, 62, 82), chip, border_radius=6)
+            pygame.draw.rect(surface, (255, 220, 90), chip, 2, border_radius=6)
+            label = self.button_font.render(scheduled, True, (255, 230, 140))
+            surface.blit(label, label.get_rect(center=chip.center))
+        if self.campaign_select_mode == "rally":
+            prompt = self.label_font.render("Select state on map →", True, (180, 220, 255))
+            surface.blit(prompt, (self.rally_button_rect.x, self.rally_button_rect.bottom + 4))
+
+        self._draw_action_button(
+            surface,
+            self.ads_button_rect,
+            "Run Ads",
+            "$10k / state",
+            enabled=self.election.can_enter_ads_mode(),
+            selecting=self.campaign_select_mode == "ads",
+            active_fill=(55, 70, 95),
+            active_border=(120, 180, 230),
+        )
+        ad_states = self.election.scheduled_ad_states
+        if ad_states:
+            summary = ", ".join(ad_states)
+            if len(summary) > 22:
+                summary = f"{len(ad_states)} states"
+            label = self.label_font.render(summary, True, (140, 210, 255))
+            surface.blit(label, (self.ads_button_rect.x, self.ads_button_rect.bottom + 4))
+        elif self.campaign_select_mode == "ads":
+            prompt = self.label_font.render("Ctrl+click for multiple →", True, (180, 220, 255))
+            surface.blit(prompt, (self.ads_button_rect.x, self.ads_button_rect.bottom + 4))
+
+    def _draw_action_button(
+        self,
+        surface: pygame.Surface,
+        rect: pygame.Rect,
+        title: str,
+        cost: str,
+        *,
+        enabled: bool,
+        selecting: bool,
+        active_fill: tuple[int, int, int],
+        active_border: tuple[int, int, int],
+    ) -> None:
+        hovered = enabled and rect.collidepoint(pygame.mouse.get_pos())
+        if selecting:
+            fill = active_fill
+            border = active_border
+        elif enabled:
+            fill = (55, 90, 150) if hovered else (45, 75, 130)
+            border = (120, 160, 220) if hovered else (90, 120, 180)
+        else:
+            fill = (40, 42, 50)
+            border = (70, 75, 90)
+        pygame.draw.rect(surface, fill, rect, border_radius=6)
+        pygame.draw.rect(surface, border, rect, 2 if selecting else 1, border_radius=6)
+        title_surface = self.label_font.render(title, True, (240, 240, 245))
+        cost_surface = self.label_font.render(cost, True, (180, 190, 210))
+        surface.blit(title_surface, (rect.x + 10, rect.y + 6))
+        surface.blit(cost_surface, (rect.x + 10, rect.y + 22))
 
 
 ElectionMapView = ElectionCampaignView

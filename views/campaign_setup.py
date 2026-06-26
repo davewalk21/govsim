@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import pygame
 
+from core.election import generate_starting_resources
 from core.party import BACKGROUND_COLOR, PARTY_COLORS, Party
 from core.policies import POLICIES, generate_campaign_platforms
+from views.currency_block import format_money
 from views.layout import VIEW_TITLE_Y
 from views.policy_spectrum import draw_policy_row
 
 SETUP_TOP = 108
-PARTY_ROW_Y = 158
-COLUMN_TOP = 218
+PARTY_ROW_Y = 178
+COLUMN_TOP = 248
 HEADER_BLOCK_HEIGHT = 52
 BUTTON_WIDTH = 160
 BUTTON_HEIGHT = 44
@@ -30,6 +32,10 @@ class CampaignSetupScreen:
         self.player_party = Party.DEMOCRAT
         self.dem_platform: dict[str, float] = {}
         self.rep_platform: dict[str, float] = {}
+        self.influence = 0.0
+        self.influence_max = 100.0
+        self.money = 0.0
+        self.money_max = 500_000.0
         self.pending_back = False
         self.pending_start = False
         self._build_controls()
@@ -37,9 +43,15 @@ class CampaignSetupScreen:
 
     def reset(self) -> None:
         self.dem_platform, self.rep_platform = generate_campaign_platforms()
+        self.influence, self.influence_max, self.money, self.money_max = (
+            generate_starting_resources()
+        )
         self.player_party = Party.DEMOCRAT
         self.pending_back = False
         self.pending_start = False
+
+    def starting_resources(self) -> tuple[float, float, float, float]:
+        return self.influence, self.influence_max, self.money, self.money_max
 
     def _build_controls(self) -> None:
         width, height = self.screen_size
@@ -106,6 +118,13 @@ class CampaignSetupScreen:
         pygame.draw.rect(surface, (90, 120, 180), chip, 1, border_radius=6)
         chip_text = self.font.render("Presidential", True, (240, 240, 245))
         surface.blit(chip_text, (chip.x + 14, chip.y + 8))
+
+        resources = self.label_font.render(
+            f"Starting resources: {int(self.influence)} influence · {format_money(self.money)}",
+            True,
+            (150, 155, 170),
+        )
+        surface.blit(resources, (48, chip.bottom + 10))
 
         party_heading = self.section_font.render("Your Party", True, (170, 175, 190))
         surface.blit(party_heading, party_heading.get_rect(midtop=(width // 2, SETUP_TOP - 4)))

@@ -26,6 +26,11 @@ TWO_PARTY_SHARE_SIGMA = 0.035
 POLL_MARGIN_RANGE = (3.0, 6.5)
 POLL_NOISE_SIGMA = 2.0
 
+RALLY_COST = 50_000
+RALLY_POLL_SHIFT = 2.5
+ADS_COST = 10_000
+ADS_POLL_SHIFT = 1.0
+
 
 class CompetitivenessTier(IntEnum):
     SAFE_DEM = 0
@@ -200,6 +205,40 @@ def apply_state_election_result(
     electorate.result_rep_votes = result.rep_votes
     electorate.result_ind_votes = result.ind_votes
     electorate.result_other_votes = result.other_votes
+
+
+def _renormalize_polls(electorate: StateElectorate) -> None:
+    total = electorate.poll_dem_pct + electorate.poll_rep_pct + electorate.poll_ind_pct
+    if total <= 0:
+        return
+    scale = 100.0 / total
+    electorate.poll_dem_pct *= scale
+    electorate.poll_rep_pct *= scale
+    electorate.poll_ind_pct *= scale
+
+
+def apply_rally(electorate: StateElectorate, player_party: Party) -> None:
+    """Shift state polls toward the player's party after a campaign rally."""
+    shift = RALLY_POLL_SHIFT
+    if player_party == Party.DEMOCRAT:
+        electorate.poll_dem_pct += shift
+        electorate.poll_rep_pct = max(0.0, electorate.poll_rep_pct - shift * 0.6)
+    else:
+        electorate.poll_rep_pct += shift
+        electorate.poll_dem_pct = max(0.0, electorate.poll_dem_pct - shift * 0.6)
+    _renormalize_polls(electorate)
+
+
+def apply_ads(electorate: StateElectorate, player_party: Party) -> None:
+    """Smaller poll shift from TV/digital ads in a state."""
+    shift = ADS_POLL_SHIFT
+    if player_party == Party.DEMOCRAT:
+        electorate.poll_dem_pct += shift
+        electorate.poll_rep_pct = max(0.0, electorate.poll_rep_pct - shift * 0.5)
+    else:
+        electorate.poll_rep_pct += shift
+        electorate.poll_dem_pct = max(0.0, electorate.poll_dem_pct - shift * 0.5)
+    _renormalize_polls(electorate)
 
 
 def _split_eligible_voters(eligible: int, lean: Party) -> tuple[int, int, int, int]:

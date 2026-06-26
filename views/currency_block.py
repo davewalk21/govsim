@@ -7,6 +7,14 @@ BLOCK_HEIGHT = 108
 BLOCK_MARGIN = 24
 
 
+def format_money(amount: float) -> str:
+    if amount >= 1_000_000:
+        return f"${amount / 1_000_000:.1f}M"
+    if amount >= 1_000:
+        return f"${amount / 1_000:.0f}k"
+    return f"${int(amount)}"
+
+
 def currency_block_rect(screen_size: tuple[int, int]) -> pygame.Rect:
     width, height = screen_size
     return pygame.Rect(
@@ -59,7 +67,11 @@ def _draw_resource_row(
     text = font.render(label, True, (170, 175, 190))
     surface.blit(text, (x, y))
 
-    value_text = font.render(f"{int(current)}/{int(maximum)}", True, (150, 155, 170))
+    value_text = font.render(
+        f"{int(current)}/{int(maximum)}" if label == "Influence" else f"{format_money(current)}",
+        True,
+        (150, 155, 170),
+    )
     surface.blit(value_text, (x + bar_width - value_text.get_width(), y))
     y += text.get_height() + 3
 

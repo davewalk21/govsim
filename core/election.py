@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import random
 from dataclasses import dataclass, field
 
 from core.defaults import all_state_leans
 from core.electorate import (
     CompetitivenessTier,
+    ADS_COST,
+    RALLY_COST,
     StateElectorate,
     StateElectionResult,
+    apply_ads,
+    apply_rally,
     apply_state_election_result,
     generate_all_electorates,
     simulate_state_election,
@@ -21,6 +26,17 @@ from core.states import ELECTORAL_VOTES_BY_STATE, ELECTORAL_VOTES_TO_WIN
 
 ELECTION_CAMPAIGN_DAYS = 7
 REVEAL_INTERVAL_MS = 1000
+STARTING_MONEY_RANGE = (120_000, 420_000)
+STARTING_INFLUENCE_RANGE = (50.0, 95.0)
+STARTING_INFLUENCE_MAX = 100.0
+
+
+def generate_starting_resources() -> tuple[float, float, float, float]:
+    money = round(random.uniform(*STARTING_MONEY_RANGE) / 1000) * 1000
+    influence = round(random.uniform(*STARTING_INFLUENCE_RANGE), 1)
+    influence_max = STARTING_INFLUENCE_MAX
+    money_max = max(money * 1.25, 500_000)
+    return influence, influence_max, money, money_max
 
 
 @dataclass
@@ -34,8 +50,10 @@ class PresidentialElection:
     opponent_promises: dict[str, float] = field(default_factory=dict)
     influence: float = 100.0
     influence_max: float = 100.0
-    money: float = 250.0
-    money_max: float = 500.0
+    money: float = 250_000.0
+    money_max: float = 500_000.0
+    scheduled_rally_state: str | None = None
+    scheduled_ad_states: list[str] = field(default_factory=list)
     results: dict[str, Party] | None = None
     winner: Party | None = None
     dem_electoral_votes: int = 0
@@ -53,6 +71,10 @@ class PresidentialElection:
         player_party: Party = Party.DEMOCRAT,
         player_promises: dict[str, float] | None = None,
         opponent_promises: dict[str, float] | None = None,
+        influence: float | None = None,
+        influence_max: float | None = None,
+        money: float | None = None,
+        money_max: float | None = None,
     ) -> PresidentialElection:
         leans = all_state_leans()
         opponent_party = (
@@ -62,6 +84,15 @@ class PresidentialElection:
             player_promises = generate_party_platform(player_party)
         if opponent_promises is None:
             opponent_promises = generate_party_platform(opponent_party)
+        rolled_inf, rolled_inf_max, rolled_money, rolled_money_max = generate_starting_resources()
+        if influence is None:
+            influence = rolled_inf
+        if influence_max is None:
+            influence_max = rolled_inf_max
+        if money is None:
+            money = rolled_money
+        if money_max is None:
+            money_max = rolled_money_max
         return cls(
             days_remaining=ELECTION_CAMPAIGN_DAYS,
             leans=leans,
@@ -70,6 +101,10 @@ class PresidentialElection:
             player_party=player_party,
             player_promises=player_promises,
             opponent_promises=opponent_promises,
+            influence=influence,
+            influence_max=influence_max,
+            money=money,
+            money_max=money_max,
         )
 
     @property
@@ -156,10 +191,97 @@ class PresidentialElection:
             return "Welcome to the White House!"
         return "You Lose. Better luck next time."
 
+    def ad_cost_total(self) -> float:
+        return len(self.scheduled_ad_states) * ADS_COST
+
+    def campaign_commitment_cost(self) -> float:
+        total = self.ad_cost_total()
+        if self.scheduled_rally_state:
+            total += RALLY_COST
+        return total
+
+    def _campaign_active(self) -> bool:
+        return (
+            not self.resolved
+            and not self.revealing
+            and self.days_remaining > 0
+        )
+
+    def can_schedule_rally(self) -> bool:
+        if not self._campaign_active():
+            return False
+        if self.scheduled_rally_state:
+            return True
+        return self.money >= RALLY_COST + self.ad_cost_total()
+
+    def schedule_rally(self, state: str) -> bool:
+        if state not in self.electorates or not self.can_schedule_rally():
+            return False
+        self.scheduled_rally_state = state
+        return True
+
+    def clear_scheduled_rally(self) -> None:
+        self.scheduled_rally_state = None
+
+    def can_enter_ads_mode(self) -> bool:
+        if not self._campaign_active():
+            return False
+        if self.scheduled_ad_states:
+            return True
+        rally_reserve = RALLY_COST if self.scheduled_rally_state else 0
+        return self.money >= rally_reserve + ADS_COST
+
+    def can_add_ad_state(self) -> bool:
+        rally_reserve = RALLY_COST if self.scheduled_rally_state else 0
+        return self.money >= rally_reserve + self.ad_cost_total() + ADS_COST
+
+    def select_ad_state(self, state: str, *, multi: bool) -> None:
+        if state not in self.electorates:
+            return
+        if multi:
+            if state in self.scheduled_ad_states:
+                self.scheduled_ad_states.remove(state)
+            elif self.can_add_ad_state():
+                self.scheduled_ad_states.append(state)
+            return
+        if self.scheduled_ad_states == [state]:
+            self.scheduled_ad_states = []
+            return
+        rally_reserve = RALLY_COST if self.scheduled_rally_state else 0
+        if self.money >= rally_reserve + ADS_COST:
+            self.scheduled_ad_states = [state]
+
+    def clear_scheduled_ads(self) -> None:
+        self.scheduled_ad_states = []
+
     def next_turn(self) -> None:
         if not self.button_enabled() or self.days_remaining <= 0:
             return
+        self._resolve_campaign_actions()
         self.days_remaining -= 1
+
+    def _resolve_campaign_actions(self) -> None:
+        self._resolve_scheduled_rally()
+        self._resolve_scheduled_ads()
+
+    def _resolve_scheduled_rally(self) -> None:
+        state = self.scheduled_rally_state
+        self.scheduled_rally_state = None
+        if not state or state not in self.electorates:
+            return
+        if self.money < RALLY_COST:
+            return
+        self.money -= RALLY_COST
+        apply_rally(self.electorates[state], self.player_party)
+
+    def _resolve_scheduled_ads(self) -> None:
+        states = list(self.scheduled_ad_states)
+        self.scheduled_ad_states = []
+        for state in states:
+            if state not in self.electorates or self.money < ADS_COST:
+                continue
+            self.money -= ADS_COST
+            apply_ads(self.electorates[state], self.player_party)
 
     def start_reveal(self) -> None:
         if not self.on_election_day:

@@ -83,6 +83,11 @@ class App:
         player_party: Party,
         dem_platform: dict[str, float],
         rep_platform: dict[str, float],
+        *,
+        influence: float | None = None,
+        influence_max: float | None = None,
+        money: float | None = None,
+        money_max: float | None = None,
     ) -> None:
         player_promises = dem_platform if player_party == Party.DEMOCRAT else rep_platform
         opponent_promises = rep_platform if player_party == Party.DEMOCRAT else dem_platform
@@ -90,6 +95,10 @@ class App:
             player_party=player_party,
             player_promises=player_promises,
             opponent_promises=opponent_promises,
+            influence=influence,
+            influence_max=influence_max,
+            money=money,
+            money_max=money_max,
         )
         self.election_view = ElectionCampaignView(self.screen_size, self.election)
         self.game_bar = ElectionGameBar(self.screen_size)
@@ -132,7 +141,18 @@ class App:
             start_config = self.campaign_setup.consume_start()
             if start_config:
                 player_party, dem_platform, rep_platform = start_config
-                self.start_new_game(player_party, dem_platform, rep_platform)
+                influence, influence_max, money, money_max = (
+                    self.campaign_setup.starting_resources()
+                )
+                self.start_new_game(
+                    player_party,
+                    dem_platform,
+                    rep_platform,
+                    influence=influence,
+                    influence_max=influence_max,
+                    money=money,
+                    money_max=money_max,
+                )
                 self.mode = AppMode.ELECTION
             return True
 
@@ -148,6 +168,8 @@ class App:
                             self.election_view.reset_state_filter()
                     else:
                         self.election.next_turn()
+                        if self.election_view:
+                            self.election_view.reset_campaign_ui()
                     self._sync_election_bar()
                 return True
             if self.election_view and self.election_view.handle_event(event):
